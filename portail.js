@@ -168,7 +168,7 @@ function buildPresentation(opts) {
 
 function requestSwitch(unlockedVault, service) {
   var credential = (unlockedVault.credentials || []).filter(function(c) {
-    return c.type === 'MembershipCredential' && c.issuer_did === VINE_DID && !c.revoked
+    return c.type === 'MembershipCredential' && !c.revoked
   })[0]
 
   var holderDid = unlockedVault.identity.id
@@ -189,7 +189,7 @@ function requestSwitch(unlockedVault, service) {
             revealKeys:       [],
             holderDid:        holderDid,
             holderPrivateKey: privateKey,
-            verifierDid:      VINE_DID,
+            verifierDid:      credential.issuer_did || VINE_DID,
             nonce:            nonce,
           }).then(function(presentation) {
             return { did: holderDid, presentation: presentation, nonce: nonce, service: service, action: 'ui', data: {} }
