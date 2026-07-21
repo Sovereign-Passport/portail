@@ -1,0 +1,219 @@
+/*
+ * SPID — Universal Switchboard Portal
+ * portail.css — §1 STYLES
+ *
+ * Same naming convention as passport.css: modular source file,
+ * inlined into the deploy artifact by build.cjs.
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-dark:    #14171c;
+  --gold:       #c9a961;
+  --gold-bright:#e8c877;
+  --text:       #eee;
+  --text-dim:   #999;
+  --red:        #c94961;
+  --green:      #6fbf73;
+  --panel:      rgba(20, 23, 28, 0.74);
+  --panel-border: rgba(201, 169, 97, 0.35);
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background: var(--bg-dark);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+.bg-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.bg-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  filter: brightness(0.55) saturate(0.9);
+}
+
+.bg-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    rgba(10, 12, 15, 0.15) 0%,
+    rgba(10, 12, 15, 0.35) 55%,
+    rgba(10, 12, 15, 0.92) 100%);
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 24px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 28px 26px 32px;
+  margin-bottom: 48px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+
+.brand { text-align: center; margin-bottom: 20px; }
+.brand .mark {
+  font-size: 11px; letter-spacing: 0.35em; color: var(--gold); text-transform: uppercase;
+}
+.brand h1 {
+  font-size: 22px; font-weight: 400; letter-spacing: 0.05em; color: var(--text); margin-top: 6px;
+}
+.brand .sub {
+  font-size: 12px; color: var(--text-dim); font-style: italic; margin-top: 4px; letter-spacing: 0.02em;
+}
+
+.field { margin-bottom: 16px; }
+.field label {
+  display: block; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 6px;
+}
+
+.did-display {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-family: 'Courier New', monospace;
+  font-size: 12.5px;
+  color: var(--gold-bright);
+  word-break: break-all;
+}
+.did-display.empty {
+  color: var(--text-dim); font-style: italic; font-family: 'Georgia', serif; font-size: 13px;
+}
+
+.pw-input, .did-input {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+  font-family: 'Georgia', serif;
+}
+.did-input { font-family: 'Courier New', monospace; font-size: 12.5px; }
+.pw-input:focus, .did-input:focus { border-color: var(--gold); }
+.pw-input::placeholder, .did-input::placeholder { color: var(--text-dim); font-style: italic; }
+
+select.svc-select {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23c9a961' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  transition: border-color 0.2s;
+}
+select.svc-select:focus { border-color: var(--gold); }
+select.svc-select option { background: #1a1d22; color: var(--text); }
+select.svc-select:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 13px 14px;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Georgia', serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s;
+}
+.btn-gold { background: linear-gradient(180deg, var(--gold-bright), var(--gold)); color: #1a1508; }
+.btn-gold:hover { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(201, 169, 97, 0.35); }
+.btn-gold:active { transform: translateY(0); }
+.btn-gold:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn svg { width: 16px; height: 16px; }
+
+.msg {
+  margin-top: 14px; padding: 11px 14px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.5; display: none;
+}
+.msg.show { display: block; }
+.msg.error   { background: rgba(201, 73, 97, 0.12);  border: 1px solid rgba(201, 73, 97, 0.35);  color: #e79aa8; }
+.msg.success { background: rgba(111, 191, 115, 0.1); border: 1px solid rgba(111, 191, 115, 0.35); color: #a3d9a5; }
+.msg.info    { background: rgba(255,255,255, 0.04);  border: 1px solid rgba(255,255,255,0.12);   color: var(--text-dim); }
+
+.result-box {
+  margin-top: 14px; padding: 12px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+  max-height: 160px;
+  overflow-y: auto;
+  display: none;
+  white-space: pre-wrap;
+}
+.result-box.show { display: block; }
+
+.divider {
+  display: flex; align-items: center; gap: 10px; margin: 16px 0;
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+}
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.1); }
+
+.footer-note {
+  text-align: center; font-size: 10.5px; color: var(--text-dim);
+  margin-top: 18px; letter-spacing: 0.03em;
+}
+.footer-note a { color: var(--gold); text-decoration: none; }
+
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(0,0,0,0.25);
+  border-top-color: #1a1508;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 480px) {
+  .panel { max-width: 100%; margin-bottom: 24px; }
+}
