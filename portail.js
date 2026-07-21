@@ -28,7 +28,7 @@ function toB64url(b) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 function fromB64url(s) {
-  var p = s.replace(/-/g, '+').replace(/\//g, '_')
+  var p = s.replace(/-/g, '+').replace(/_/g, '/')
     .padEnd(s.length + (4 - s.length % 4) % 4, '=')
   return Uint8Array.from(atob(p), function(c) { return c.charCodeAt(0) })
 }
