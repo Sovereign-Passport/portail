@@ -1,27 +1,25 @@
 /*
  * SPID — Universal Switchboard Portal
- * portail.js — §1 CRYPTO + §2 SWITCHBOARD REQUEST + §3 UI WIRING
+ * portail.js — §1 CRYPTO + §2 ACCESS DISCOVERY + §3 UI WIRING
  *
- * Same-origin as the Passport PWA (deploy under the same GitHub Pages
- * repo, e.g. sovereign-passport.github.io/portail/) so it reads the SAME
- * IndexedDB vault — no separate login, no duplicated identity.
+ * Same-origin as the Passport PWA — reads the SAME IndexedDB vault.
+ * Crypto primitives identical to passport.crypto.js. WebCrypto only.
  *
- * Crypto primitives below mirror passport.crypto.js / src/crypto/vault.js /
- * src/credentials/credentials.js, kept byte-for-byte identical so
- * signatures and presentations verify correctly against the vine
- * switchboard (mdusl spid-js). Zero external libraries. WebCrypto only.
+ * The switchboard host is derived from the membership credential's
+ * issuer did:web (your passport talks to YOUR vine). DEFAULT_HOST is
+ * only the fallback for bare passports (no vine credential yet) —
+ * the network's welcome door.
  *
- * ES2017 target — same discipline as the rest of the passport source.
- * Forbidden: ?. ?? 0n 600_000 catch{} {...obj}
+ * ES2017 target. Forbidden: ?. ?? 0n 600_000 catch{} {...obj}
  */
 
 // ═════════════════════════════════════════════════════════════════════════
 // SECTION 1 — CRYPTO (identical to passport.crypto.js primitives)
 // ═════════════════════════════════════════════════════════════════════════
 
-var SWITCHBOARD_HOST = 'https://mdusl.sovereign-passport.id'
-var VINE_DID          = 'did:web:mdusl.sovereign-passport.id'
-var PBKDF2_ITER        = 600000
+var DEFAULT_HOST = 'https://mdusl.sovereign-passport.id'
+var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
+var PBKDF2_ITER = 600000
 
 function toB64url(b) {
   return btoa(String.fromCharCode.apply(null, new Uint8Array(b)))
@@ -163,18 +161,33 @@ function buildPresentation(opts) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// SECTION 2 — SWITCHBOARD REQUEST
+// SECTION 2 — ACCESS DISCOVERY
 // ═════════════════════════════════════════════════════════════════════════
 
-function requestSwitch(unlockedVault, service) {
+// Derive the switchboard host from the credential issuer's did:web.
+// did:web:mdusl.sovereign-passport.id → https://mdusl.sovereign-passport.id
+// Bare passports (no credential) fall back to the network welcome door.
+function switchboardHostFor(credential) {
+  if (credential && credential.issuer_did &&
+      credential.issuer_did.indexOf('did:web:') === 0) {
+    var domain = credential.issuer_did.slice('did:web:'.length)
+    // did:web path segments use ':' — convert to '/' (rare, but spec-legal)
+    domain = domain.split(':').join('/')
+    return 'https://' + domain
+  }
+  return DEFAULT_HOST
+}
+
+function requestAccess(unlockedVault) {
   var credential = (unlockedVault.credentials || []).filter(function(c) {
     return c.type === 'MembershipCredential' && !c.revoked
   })[0]
 
   var holderDid = unlockedVault.identity.id
+  var host      = switchboardHostFor(credential)
 
   return importPrivateKey(unlockedVault.keys.privateKey).then(function(privateKey) {
-    return fetch(SWITCHBOARD_HOST + '/api/switch/nonce')
+    return fetch(host + '/api/switch/nonce')
       .then(function(nonceResp) {
         if (!nonceResp.ok) throw new Error('Could not reach the switchboard for a nonce.')
         return nonceResp.json()
@@ -189,21 +202,22 @@ function requestSwitch(unlockedVault, service) {
             revealKeys:       [],
             holderDid:        holderDid,
             holderPrivateKey: privateKey,
-            verifierDid:      credential.issuer_did || VINE_DID,
+            verifierDid:      credential.issuer_did || DEFAULT_VINE_DID,
             nonce:            nonce,
           }).then(function(presentation) {
-            return { did: holderDid, presentation: presentation, nonce: nonce, service: service, action: 'ui', data: {} }
+            return { did: holderDid, presentation: presentation, nonce: nonce,
+                     service: 'spid', action: 'access', data: {} }
           })
         } else {
           bodyPromise = Promise.resolve(
-            { did: holderDid, service: service, action: 'ui', data: {} }
+            { service: 'spid', action: 'access', data: {} }
           )
         }
 
         return bodyPromise
       })
       .then(function(body) {
-        return fetch(SWITCHBOARD_HOST + '/api/switch', {
+        return fetch(host + '/api/switch', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(body),
@@ -221,16 +235,13 @@ var unlockField    = document.getElementById('unlockField')
 var pwInput        = document.getElementById('pwInput')
 var unlockBtn      = document.getElementById('unlockBtn')
 var unlockBtnLabel = document.getElementById('unlockBtnLabel')
-var svcDivider     = document.getElementById('svcDivider')
-var svcField       = document.getElementById('svcField')
-var svcSelect      = document.getElementById('svcSelect')
-var enterBtn       = document.getElementById('enterBtn')
-var enterBtnLabel  = document.getElementById('enterBtnLabel')
+var doorsDivider   = document.getElementById('doorsDivider')
+var doorsField     = document.getElementById('doorsField')
+var doorsList      = document.getElementById('doorsList')
 var msgBox         = document.getElementById('msgBox')
-var resultBox      = document.getElementById('resultBox')
 
-var _storedPayload = null   // { did, salt, iv, ciphertext, created_at, updated_at }
-var _unlockedVault  = null  // decrypted vault object, after successful unlock
+var _storedPayload = null
+var _unlockedVault = null
 
 function showMsg(kind, text) {
   msgBox.className = 'msg show ' + kind
@@ -240,9 +251,27 @@ function clearMsg() {
   msgBox.className = 'msg'
   msgBox.textContent = ''
 }
-function showResult(text) {
-  resultBox.className = 'result-box show'
-  resultBox.textContent = text
+
+function showDoors(level, services) {
+  doorsDivider.style.display = 'flex'
+  doorsField.style.display   = 'block'
+  doorsList.innerHTML        = ''
+
+  if (!services || services.length === 0) {
+    var empty = document.createElement('div')
+    empty.className = 'door-empty'
+    empty.textContent = 'No doors open for this passport yet. Ask your vine for an invitation.'
+    doorsList.appendChild(empty)
+    return
+  }
+
+  services.forEach(function(svc) {
+    var a = document.createElement('a')
+    a.className   = 'door-link'
+    a.href        = svc.url
+    a.textContent = svc.label
+    doorsList.appendChild(a)
+  })
 }
 
 // ── Step 1 — detect a stored passport on this device ─────────────────────
@@ -265,7 +294,7 @@ loadStoredVault()
     pwInput.focus()
   })
 
-// ── Step 2 — unlock the vault (same PBKDF2/AES-GCM as the Passport) ──────
+// ── Step 2 — unlock, then the vine answers with YOUR doors ───────────────
 unlockBtn.addEventListener('click', function() {
   clearMsg()
   var password = pwInput.value
@@ -280,18 +309,32 @@ unlockBtn.addEventListener('click', function() {
   unlockVault(password, _storedPayload.salt, _storedPayload.iv, _storedPayload.ciphertext)
     .then(function(result) {
       _unlockedVault = result.vault
-
       unlockField.style.display = 'none'
-      svcDivider.style.display  = 'flex'
-      svcField.style.display    = 'block'
-      enterBtn.style.display    = 'flex'
-      showMsg('success', 'Passport unlocked. Choose a service.')
+      showMsg('info', 'Passport unlocked. Asking your vine…')
+      return requestAccess(_unlockedVault)
+    })
+    .then(function(resp) {
+      if (!resp) return
+      return resp.text().then(function(responseText) {
+        var parsed = null
+        try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
+
+        if (!resp.ok) {
+          var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + resp.status)
+          showMsg('error', 'Access denied: ' + reason)
+          return
+        }
+
+        clearMsg()
+        showDoors(parsed.level, parsed.services)
+      })
     })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
+        unlockField.style.display = 'block'
       } else {
-        showMsg('error', 'Could not unlock this passport: ' + e.message)
+        showMsg('error', 'Request failed: ' + e.message)
       }
     })
     .then(function() {
@@ -302,45 +345,4 @@ unlockBtn.addEventListener('click', function() {
 
 pwInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') unlockBtn.click()
-})
-
-// ── Step 3 — find the MduSL membership credential, sign, submit ──────────
-enterBtn.addEventListener('click', function() {
-  clearMsg()
-  resultBox.className = 'result-box'
-
-  if (!_unlockedVault) {
-    showMsg('error', 'Unlock your passport first.')
-    return
-  }
-
-  var service = svcSelect.value
-
-  enterBtn.disabled = true
-  enterBtnLabel.innerHTML = '<span class="spinner"></span>'
-
-  requestSwitch(_unlockedVault, service)
-    .then(function(switchResp) {
-      return switchResp.text().then(function(responseText) {
-        var parsed = null
-        try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
-
-        if (!switchResp.ok) {
-          var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + switchResp.status)
-          showMsg('error', 'Access denied: ' + reason)
-          if (parsed) showResult(JSON.stringify(parsed, null, 2))
-          return
-        }
-
-        showMsg('success', 'Connected to ' + service + '.')
-        showResult(parsed ? JSON.stringify(parsed, null, 2) : responseText)
-      })
-    })
-    .catch(function(e) {
-      showMsg('error', 'Request failed: ' + e.message)
-    })
-    .then(function() {
-      enterBtn.disabled = false
-      enterBtnLabel.textContent = 'Enter'
-    })
 })
