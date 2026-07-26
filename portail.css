@@ -214,6 +214,35 @@ select.svc-select:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.doors-list { display: flex; flex-direction: column; gap: 10px; }
+
+.door-link {
+  display: block;
+  padding: 13px 16px;
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: #1a1508;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.door-link:hover { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(201, 169, 97, 0.35); }
+.door-link:active { transform: translateY(0); }
+
+.door-empty {
+  padding: 12px 14px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-dim);
+  text-align: center;
+  border: 1px dashed rgba(255,255,255,0.15);
+  border-radius: 8px;
+}
+
 @media (max-width: 480px) {
   .panel { max-width: 100%; margin-bottom: 24px; }
 }
