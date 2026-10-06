@@ -346,3 +346,95 @@ unlockBtn.addEventListener('click', function() {
 pwInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') unlockBtn.click()
 })
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 4 — SERVICES SHELL (tabs, #service fragment, ?embed=1)
+//
+// Only the `embed` flag and the `service` fragment are read from the URL.
+// No secret, DID or authorization is ever accepted from the URL.
+// ═════════════════════════════════════════════════════════════════════════
+
+var SERVICES = ['assist', 'billboard', 'calendar', 'messages']
+var DEFAULT_SERVICE = 'assist'
+
+var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
+var servicePanels = {}
+SERVICES.forEach(function(name) {
+  servicePanels[name] = document.getElementById('panel-' + name)
+})
+
+function normalizeService(value) {
+  return SERVICES.indexOf(value) !== -1 ? value : DEFAULT_SERVICE
+}
+
+function activateService(name) {
+  var target = normalizeService(name)
+
+  tabButtons.forEach(function(btn) {
+    var selected = btn.getAttribute('data-service') === target
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false')
+    btn.tabIndex = selected ? 0 : -1
+  })
+
+  SERVICES.forEach(function(n) {
+    var panel = servicePanels[n]
+    if (!panel) return
+    if (n === target) panel.removeAttribute('hidden')
+    else panel.setAttribute('hidden', '')
+  })
+}
+
+function serviceFromHash() {
+  var h = location.hash || ''
+  if (h.charAt(0) === '#') h = h.slice(1)
+  try {
+    return new URLSearchParams(h).get('service')
+  } catch (err) {
+    return null
+  }
+}
+
+function updateHash(name) {
+  var target = normalizeService(name)
+  var next = '#service=' + target
+  if (location.hash !== next) location.hash = next
+}
+
+// Tab clicks — update the fragment without reloading the page.
+tabButtons.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    updateHash(btn.getAttribute('data-service'))
+  })
+})
+
+// Keyboard navigation — ARIA tabs pattern, automatic activation.
+function onTabKeydown(e) {
+  var idx = tabButtons.indexOf(e.currentTarget)
+  if (idx === -1) return
+  var next = null
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % tabButtons.length
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (idx - 1 + tabButtons.length) % tabButtons.length
+  else if (e.key === 'Home') next = 0
+  else if (e.key === 'End') next = tabButtons.length - 1
+  if (next === null) return
+  e.preventDefault()
+  tabButtons[next].focus()
+  updateHash(tabButtons[next].getAttribute('data-service'))
+}
+tabButtons.forEach(function(btn) {
+  btn.addEventListener('keydown', onTabKeydown)
+})
+
+window.addEventListener('hashchange', function() {
+  activateService(serviceFromHash())
+})
+
+// Embed mode — ?embed=1 makes the page transparent for the MduSL host UI.
+try {
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    document.documentElement.classList.add('embed')
+  }
+} catch (err) {}
+
+// Fragment absent or invalid → Assist.
+activateService(serviceFromHash())

@@ -73,7 +73,7 @@ html, body {
   border-radius: 16px;
   padding: 28px 26px 32px;
   margin-bottom: 48px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 44px rgba(0,0,0,0.55);
 }
 
 .brand { text-align: center; margin-bottom: 20px; }
@@ -85,6 +85,56 @@ html, body {
 }
 .brand .sub {
   font-size: 12px; color: var(--text-dim); font-style: italic; margin-top: 4px; letter-spacing: 0.02em;
+}
+
+/* ── Service tabs ─────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin: 18px 0 0;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 10px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: 'Georgia', serif;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+/* Active state uses shape + weight, never colour alone. */
+.tab[aria-selected="true"] {
+  color: var(--gold-bright);
+  font-weight: 700;
+  border-bottom-color: var(--gold);
+  background: rgba(201, 169, 97, 0.08);
+}
+.tab[aria-selected="true"]::before { content: '▸ '; font-size: 10px; }
+
+.tab-panel { padding-top: 18px; outline: none; }
+.tab-panel:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.service-soon {
+  padding: 30px 14px;
+  text-align: center;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--text-dim);
+  border: 1px dashed rgba(255,255,255,0.15);
+  border-radius: 10px;
 }
 
 .field { margin-bottom: 16px; }
@@ -255,4 +305,12 @@ select.svc-select:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 @media (max-width: 480px) {
   .panel { max-width: 100%; margin-bottom: 24px; }
+  .tab { font-size: 11px; letter-spacing: 0.08em; padding: 9px 7px 8px; }
 }
+
+/* ── Embedded mode (?embed=1) — transparent, fits the MduSL host UI ── */
+html.embed,
+html.embed body { background: transparent; }
+html.embed .bg-wrap { display: none; }
+html.embed .content { min-height: 0; padding: 0; justify-content: center; }
+html.embed .panel { margin-bottom: 0; }

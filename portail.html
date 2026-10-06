@@ -21,29 +21,59 @@
         <div class="sub">Portal to sovereign services</div>
       </div>
 
-      <!-- DID field — shown as soon as a passport is detected -->
-      <div class="field">
-        <label>Your DID</label>
-        <div id="didDisplay" class="did-display empty">Checking this device…</div>
+      <!-- Service tabs — Assist is the default active service -->
+      <div class="tabs" role="tablist" aria-label="SPID services">
+        <button class="tab" id="tab-assist" role="tab" type="button"
+                aria-controls="panel-assist" aria-selected="true" data-service="assist">Assist</button>
+        <button class="tab" id="tab-billboard" role="tab" type="button"
+                aria-controls="panel-billboard" aria-selected="false" data-service="billboard" tabindex="-1">Billboard</button>
+        <button class="tab" id="tab-calendar" role="tab" type="button"
+                aria-controls="panel-calendar" aria-selected="false" data-service="calendar" tabindex="-1">Calendar</button>
+        <button class="tab" id="tab-messages" role="tab" type="button"
+                aria-controls="panel-messages" aria-selected="false" data-service="messages" tabindex="-1">Messages</button>
       </div>
 
-      <!-- Unlock field — shown only if a vault is present and locked -->
-      <div class="field" id="unlockField" style="display:none">
-        <label>Vault password</label>
-        <input id="pwInput" class="pw-input" type="password" placeholder="Your passport password" autocomplete="current-password">
-        <button id="unlockBtn" class="btn btn-gold" style="margin-top:10px">
-          <span id="unlockBtnLabel">Unlock →</span>
-        </button>
-      </div>
+      <!-- Assist — current Passport detection and access flow (unchanged) -->
+      <section class="tab-panel" id="panel-assist" role="tabpanel" aria-labelledby="tab-assist" tabindex="0">
 
-      <div class="divider" id="doorsDivider" style="display:none">your doors</div>
+        <!-- DID field — shown as soon as a passport is detected -->
+        <div class="field">
+          <label>Your DID</label>
+          <div id="didDisplay" class="did-display empty">Checking this device…</div>
+        </div>
 
-      <!-- Doors — the vine answers with the services open to this DID -->
-      <div class="field" id="doorsField" style="display:none">
-        <div id="doorsList" class="doors-list"></div>
-      </div>
+        <!-- Unlock field — shown only if a vault is present and locked -->
+        <div class="field" id="unlockField" style="display:none">
+          <label>Vault password</label>
+          <input id="pwInput" class="pw-input" type="password" placeholder="Your passport password" autocomplete="current-password">
+          <button id="unlockBtn" class="btn btn-gold" style="margin-top:10px">
+            <span id="unlockBtnLabel">Unlock →</span>
+          </button>
+        </div>
 
-      <div id="msgBox" class="msg"></div>
+        <div class="divider" id="doorsDivider" style="display:none">your doors</div>
+
+        <!-- Doors — the vine answers with the services open to this DID -->
+        <div class="field" id="doorsField" style="display:none">
+          <div id="doorsList" class="doors-list"></div>
+        </div>
+
+        <div id="msgBox" class="msg"></div>
+
+      </section>
+
+      <!-- Placeholder services — no business form, no backend call yet -->
+      <section class="tab-panel" id="panel-billboard" role="tabpanel" aria-labelledby="tab-billboard" tabindex="0" hidden>
+        <p class="service-soon">Service in preparation</p>
+      </section>
+
+      <section class="tab-panel" id="panel-calendar" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0" hidden>
+        <p class="service-soon">Service in preparation</p>
+      </section>
+
+      <section class="tab-panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" tabindex="0" hidden>
+        <p class="service-soon">Service in preparation</p>
+      </section>
 
       <div class="footer-note">
         <em>The math is the authority. Not the institution.</em><br>
