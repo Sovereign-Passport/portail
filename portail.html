@@ -62,9 +62,53 @@
 
       </section>
 
-      <!-- Placeholder services — no business form, no backend call yet -->
+      <!-- Billboard — public read (no Passport) + signed public create -->
       <section class="tab-panel" id="panel-billboard" role="tabpanel" aria-labelledby="tab-billboard" tabindex="0" hidden>
-        <p class="service-soon">Service in preparation</p>
+
+        <div class="bb-toolbar">
+          <button class="btn btn-ghost" id="bbRefreshBtn" type="button">Refresh</button>
+          <button class="btn btn-gold" id="bbNewBtn" type="button" style="display:none;">New post</button>
+        </div>
+        <p class="bb-note" id="bbCreateHint">Open your Passport to publish</p>
+
+        <div id="bbStatus" class="bb-status" style="display:none;"></div>
+        <div id="bbList" class="bb-list"></div>
+
+        <!-- Composer — scope is fixed to public in this pass -->
+        <form id="bbForm" class="bb-form" style="display:none;" onsubmit="return false;">
+          <div class="field">
+            <label>Title <span class="bb-count" id="bbTitleCount">0 / 160</span></label>
+            <input id="bbTitle" class="did-input" type="text" maxlength="160" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Message <span class="bb-count" id="bbBodyCount">0 / 5000</span></label>
+            <textarea id="bbBody" class="bb-textarea" rows="5" maxlength="5000"></textarea>
+          </div>
+          <div class="field">
+            <label>Optional expiration</label>
+            <input id="bbExpires" class="did-input" type="datetime-local">
+          </div>
+          <div id="bbFormError" class="msg" style="display:none;"></div>
+          <div class="bb-actions">
+            <button class="btn btn-ghost" id="bbCancelBtn" type="button">Cancel</button>
+            <button class="btn btn-gold" id="bbReviewBtn" type="button">Review &amp; sign →</button>
+          </div>
+        </form>
+
+        <!-- Confirmation card — required before signing -->
+        <div id="bbConfirm" class="bb-confirm" style="display:none;">
+          <p class="cred-type">Confirm announcement</p>
+          <div class="bb-confirm-row"><span>Scope</span><strong>Public</strong></div>
+          <div class="bb-confirm-row"><span>Title</span><strong id="bbConfirmTitle"></strong></div>
+          <div class="bb-confirm-row"><span>Message</span><div id="bbConfirmBody"></div></div>
+          <div class="bb-confirm-row" id="bbConfirmExpRow" style="display:none;"><span>Expires</span><strong id="bbConfirmExp"></strong></div>
+          <div id="bbConfirmError" class="msg" style="display:none;"></div>
+          <div class="bb-actions" style="margin-top:12px;">
+            <button class="btn btn-ghost" id="bbBackBtn" type="button">Back</button>
+            <button class="btn btn-gold" id="bbSignBtn" type="button">Sign &amp; publish</button>
+          </div>
+        </div>
+
       </section>
 
       <section class="tab-panel" id="panel-calendar" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0" hidden>

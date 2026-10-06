@@ -314,3 +314,43 @@ html.embed body { background: transparent; }
 html.embed .bg-wrap { display: none; }
 html.embed .content { min-height: 0; padding: 0; justify-content: center; }
 html.embed .panel { margin-bottom: 0; }
+
+/* ── Billboard ─────────────────────────────────────────────────────── */
+.bb-toolbar { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 8px; }
+.bb-toolbar .btn { width: auto; }
+.bb-note { font-size: 12px; color: var(--text-dim); font-style: italic; margin: 4px 0 10px; }
+.bb-status { font-size: 12.5px; color: var(--green); margin: 8px 0; }
+.bb-list { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.bb-empty { font-size: 12.5px; color: var(--text-dim); font-style: italic; text-align: center; padding: 16px 8px; }
+.bb-list .btn { width: auto; margin: 0 auto; }
+.bb-post {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.bb-post-title { font-size: 15px; color: var(--text); margin-bottom: 6px; font-weight: 400; }
+.bb-post-body { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.bb-post-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 10.5px; color: var(--text-dim); }
+.bb-form { margin-top: 8px; }
+.bb-count { float: right; font-size: 10px; color: var(--text-dim); letter-spacing: 0; text-transform: none; }
+.bb-textarea {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  font-family: 'Georgia', serif;
+  resize: vertical;
+}
+.bb-textarea:focus { border-color: var(--gold); }
+.bb-confirm { margin-top: 8px; }
+.bb-confirm-row { display: flex; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
+.bb-confirm-row > span { color: var(--text-dim); min-width: 64px; }
+.bb-confirm-row > strong,
+.bb-confirm-row > div { color: var(--text); word-break: break-word; white-space: pre-wrap; }
+.bb-actions { display: flex; gap: 8px; }
+.bb-actions .btn { width: auto; flex: 1; }

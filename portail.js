@@ -309,6 +309,7 @@ unlockBtn.addEventListener('click', function() {
   unlockVault(password, _storedPayload.salt, _storedPayload.iv, _storedPayload.ciphertext)
     .then(function(result) {
       _unlockedVault = result.vault
+      updateBillboardComposer()
       unlockField.style.display = 'none'
       showMsg('info', 'Passport unlocked. Asking your vine…')
       return requestAccess(_unlockedVault)
@@ -348,6 +349,317 @@ pwInput.addEventListener('keydown', function(e) {
 })
 
 // ═════════════════════════════════════════════════════════════════════════
+// SECTION 5 — BILLBOARD (public read + signed public create)
+//
+// Public read needs NO Passport. Creation needs an UNLOCKED Passport (the
+// Ed25519 private key is in memory). The only URL inputs are the `service`
+// fragment and `?embed=1` — never a DID, role or authorization.
+// ═════════════════════════════════════════════════════════════════════════
+
+var bbRefreshBtn    = document.getElementById('bbRefreshBtn')
+var bbNewBtn        = document.getElementById('bbNewBtn')
+var bbCreateHint    = document.getElementById('bbCreateHint')
+var bbStatus        = document.getElementById('bbStatus')
+var bbList          = document.getElementById('bbList')
+var bbForm          = document.getElementById('bbForm')
+var bbTitle         = document.getElementById('bbTitle')
+var bbBody          = document.getElementById('bbBody')
+var bbExpires       = document.getElementById('bbExpires')
+var bbTitleCount    = document.getElementById('bbTitleCount')
+var bbBodyCount     = document.getElementById('bbBodyCount')
+var bbFormError     = document.getElementById('bbFormError')
+var bbReviewBtn     = document.getElementById('bbReviewBtn')
+var bbCancelBtn     = document.getElementById('bbCancelBtn')
+var bbConfirm       = document.getElementById('bbConfirm')
+var bbConfirmTitle  = document.getElementById('bbConfirmTitle')
+var bbConfirmBody   = document.getElementById('bbConfirmBody')
+var bbConfirmExp    = document.getElementById('bbConfirmExp')
+var bbConfirmExpRow = document.getElementById('bbConfirmExpRow')
+var bbConfirmError  = document.getElementById('bbConfirmError')
+var bbBackBtn       = document.getElementById('bbBackBtn')
+var bbSignBtn       = document.getElementById('bbSignBtn')
+
+// Signed credential reused byte-for-byte across retries in one attempt.
+var _bbPending = null
+
+/** Switchboard host: the vine of the unlocked Passport, else the welcome door. */
+function bbHost() {
+  var cred = null
+  if (_unlockedVault && _unlockedVault.credentials) {
+    var list = _unlockedVault.credentials.filter(function(c) {
+      return c.type === 'MembershipCredential' && !c.revoked
+    })
+    cred = list.length ? list[0] : null
+  }
+  return switchboardHostFor(cred)
+}
+
+/** One POST to the Switchboard. Never exposes a key/password/vault. */
+function bbSwitch(body) {
+  return fetch(bbHost() + '/api/switch', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  })
+}
+
+function bbShortDid(did) {
+  if (!did) return '—'
+  return did.length > 24 ? did.slice(0, 16) + '…' + did.slice(-6) : did
+}
+
+function bbShowStatus(text) {
+  bbStatus.textContent = text
+  bbStatus.style.display = 'block'
+}
+function bbHideStatus() {
+  bbStatus.style.display = 'none'
+  bbStatus.textContent = ''
+}
+
+function renderBillboardPosts(posts) {
+  bbList.innerHTML = ''
+  if (!posts || posts.length === 0) {
+    var empty = document.createElement('p')
+    empty.className = 'bb-empty'
+    empty.textContent = 'No public announcements yet.'
+    bbList.appendChild(empty)
+    return
+  }
+  posts.forEach(function(p) {
+    var card = document.createElement('article')
+    card.className = 'bb-post'
+
+    var h = document.createElement('h3')
+    h.className = 'bb-post-title'
+    h.textContent = p.title || ''
+    card.appendChild(h)
+
+    var b = document.createElement('p')
+    b.className = 'bb-post-body'
+    b.textContent = p.body || ''
+    card.appendChild(b)
+
+    var meta = document.createElement('div')
+    meta.className = 'bb-post-meta'
+    var by = document.createElement('span')
+    by.textContent = bbShortDid(p.author_did)
+    meta.appendChild(by)
+    if (p.expires_at) {
+      var exp = document.createElement('span')
+      exp.textContent = 'expires ' + new Date(p.expires_at).toLocaleString()
+      meta.appendChild(exp)
+    }
+    card.appendChild(meta)
+    bbList.appendChild(card)
+  })
+}
+
+/** Public read via Switchboard (service=billboard, action=public). */
+function loadBillboardPublic() {
+  bbHideStatus()
+  bbList.innerHTML = ''
+  var loading = document.createElement('p')
+  loading.className = 'bb-empty'
+  loading.textContent = 'Loading…'
+  bbList.appendChild(loading)
+
+  return bbSwitch({ service: 'billboard', action: 'public' })
+    .then(function(resp) {
+      return resp.text().then(function(t) {
+        var data = null
+        try { data = JSON.parse(t) } catch (e) { data = null }
+        return { ok: resp.ok, status: resp.status, data: data }
+      })
+    })
+    .then(function(r) {
+      if (!r.ok || !r.data || !Array.isArray(r.data.posts)) {
+        var msg = (r.data && (r.data.message || r.data.error)) || ('HTTP ' + r.status)
+        throw new Error(msg)
+      }
+      renderBillboardPosts(r.data.posts)
+    })
+    .catch(function(e) {
+      bbList.innerHTML = ''
+      var err = document.createElement('p')
+      err.className = 'bb-empty'
+      err.textContent = 'Could not load announcements: ' + e.message
+      bbList.appendChild(err)
+      var retry = document.createElement('button')
+      retry.type = 'button'
+      retry.className = 'btn btn-ghost'
+      retry.textContent = 'Retry'
+      retry.addEventListener('click', loadBillboardPublic)
+      bbList.appendChild(retry)
+    })
+}
+
+function bbUpdateCounts() {
+  bbTitleCount.textContent = (bbTitle.value ? bbTitle.value.length : 0) + ' / 160'
+  bbBodyCount.textContent  = (bbBody.value  ? bbBody.value.length  : 0) + ' / 5000'
+}
+
+function bbHideForm() {
+  bbForm.style.display = 'none'
+  bbFormError.style.display = 'none'
+  bbFormError.textContent = ''
+  _bbPending = null   // Cancel/close invalidates any memoized credential
+}
+
+function bbShowForm() {
+  bbConfirm.style.display = 'none'
+  bbConfirmError.style.display = 'none'
+  bbForm.style.display = 'block'
+  _bbPending = null
+  bbUpdateCounts()
+  bbTitle.focus()
+}
+
+function bbShowFormError(msg) {
+  bbFormError.textContent = msg
+  bbFormError.className = 'msg show error'
+  bbFormError.style.display = 'block'
+}
+
+/** Local validation. Bounds on the exact values; trim only checks emptiness. */
+function bbValidate() {
+  var title = bbTitle.value
+  var body  = bbBody.value
+  if (title.trim().length === 0)   return 'Title is required.'
+  if (title.length > 160)          return 'Title must be 160 characters or fewer.'
+  if (body.trim().length === 0)    return 'Message is required.'
+  if (body.length > 5000)          return 'Message must be 5000 characters or fewer.'
+  if (bbExpires.value) {
+    var ms = Date.parse(bbExpires.value)
+    if (!isFinite(ms))   return 'Invalid expiration date.'
+    if (ms <= Date.now()) return 'Expiration must be in the future.'
+  }
+  return null
+}
+
+function bbReview() {
+  var err = bbValidate()
+  if (err) { bbShowFormError(err); return }
+  _bbPending = null   // a new confirmation → a fresh id/signature
+  bbFormError.style.display = 'none'
+  bbConfirmTitle.textContent = bbTitle.value
+  bbConfirmBody.textContent  = bbBody.value
+  if (bbExpires.value) {
+    bbConfirmExpRow.style.display = 'flex'
+    bbConfirmExp.textContent = new Date(bbExpires.value).toLocaleString()
+  } else {
+    bbConfirmExpRow.style.display = 'none'
+  }
+  bbConfirmError.style.display = 'none'
+  bbForm.style.display = 'none'
+  bbConfirm.style.display = 'block'
+}
+
+/**
+ * Build + sign the EXACT backend contract, key order:
+ *   id, type, action, actor_did, post_id, scope, cluster_id, version,
+ *   title, body, expires_at, issued_at  →  signature appended last.
+ */
+function bbBuildCredential() {
+  var expIso = null
+  if (bbExpires.value) {
+    expIso = new Date(Date.parse(bbExpires.value)).toISOString()
+  }
+  var payload = {
+    id:         uuid(),
+    type:       'BillboardAction',
+    action:     'create',
+    actor_did:  _unlockedVault.identity.id,
+    post_id:    uuid(),
+    scope:      'public',
+    cluster_id: null,
+    version:    1,
+    title:      bbTitle.value,
+    body:       bbBody.value,
+    expires_at: expIso,
+    issued_at:  nowIso(),
+  }
+  return importPrivateKey(_unlockedVault.keys.privateKey).then(function(privateKey) {
+    return edSign(privateKey, JSON.stringify(payload))
+  }).then(function(sig) {
+    payload.signature = sig
+    return payload
+  })
+}
+
+function bbPublish() {
+  if (!_unlockedVault) { updateBillboardComposer(); return }
+  if (bbSignBtn.disabled) return
+  bbSignBtn.disabled = true
+  bbSignBtn.textContent = 'Publishing…'
+  bbConfirmError.style.display = 'none'
+
+  var build = _bbPending ? Promise.resolve(_bbPending) : bbBuildCredential()
+
+  build.then(function(cred) {
+    _bbPending = cred   // same id/signature reused on retry
+    return bbSwitch({ service: 'billboard', action: 'action', data: cred })
+  }).then(function(resp) {
+    return resp.text().then(function(t) {
+      var data = null
+      try { data = JSON.parse(t) } catch (e) { data = null }
+      return { ok: resp.ok, status: resp.status, data: data }
+    })
+  }).then(function(r) {
+    if (!r.ok || !r.data || r.data.success !== true) {
+      var msg = (r.data && (r.data.message || r.data.error)) || ('HTTP ' + r.status)
+      throw new Error(msg)
+    }
+    _bbPending = null
+    bbConfirm.style.display = 'none'
+    bbHideForm()
+    bbTitle.value = ''
+    bbBody.value = ''
+    bbExpires.value = ''
+    bbUpdateCounts()
+    // Show the success message after the list reload (which clears status).
+    return loadBillboardPublic().then(function() {
+      bbShowStatus('Announcement published.')
+    })
+  }).catch(function(e) {
+    // Failure keeps the form values and the signed credential (same-id retry).
+    bbConfirmError.textContent = 'Could not publish: ' + e.message
+    bbConfirmError.className = 'msg show error'
+    bbConfirmError.style.display = 'block'
+  }).then(function() {
+    bbSignBtn.disabled = false
+    bbSignBtn.textContent = 'Sign & publish'
+  })
+}
+
+/** Creation is offered only when the Passport is unlocked. */
+function updateBillboardComposer() {
+  var unlocked = !!_unlockedVault
+  bbNewBtn.style.display    = unlocked ? 'inline-block' : 'none'
+  bbCreateHint.style.display = unlocked ? 'none' : 'block'
+  if (!unlocked) {
+    bbHideForm()
+    bbConfirm.style.display = 'none'
+  }
+}
+
+bbRefreshBtn.addEventListener('click', loadBillboardPublic)
+bbNewBtn.addEventListener('click', bbShowForm)
+bbCancelBtn.addEventListener('click', bbHideForm)
+bbReviewBtn.addEventListener('click', bbReview)
+bbBackBtn.addEventListener('click', function() {
+  bbConfirm.style.display = 'none'
+  bbForm.style.display = 'block'
+})
+bbSignBtn.addEventListener('click', bbPublish)
+bbTitle.addEventListener('input', function() { bbUpdateCounts(); _bbPending = null })
+bbBody.addEventListener('input',  function() { bbUpdateCounts(); _bbPending = null })
+bbExpires.addEventListener('input', function() { _bbPending = null })
+
+updateBillboardComposer()
+
+
+// ═════════════════════════════════════════════════════════════════════════
 // SECTION 4 — SERVICES SHELL (tabs, #service fragment, ?embed=1)
 //
 // Only the `embed` flag and the `service` fragment are read from the URL.
@@ -382,6 +694,11 @@ function activateService(name) {
     if (n === target) panel.removeAttribute('hidden')
     else panel.setAttribute('hidden', '')
   })
+
+  if (target === 'billboard') {
+    updateBillboardComposer()
+    loadBillboardPublic()
+  }
 }
 
 function serviceFromHash() {
