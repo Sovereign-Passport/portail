@@ -482,7 +482,7 @@ function bbSelectedCluster() {
 }
 
 /** Rebuild the <select> from _bbClusters, preserving the current selection. */
-function bbRenderClusterSelect() {
+function bbRenderClusterSelect(preferredId) {
   var keep = bbClusterSelect.value
   bbClusterSelect.innerHTML = ''
   _bbClusters.forEach(function(c) {
@@ -491,6 +491,13 @@ function bbRenderClusterSelect() {
     opt.textContent = c.label
     bbClusterSelect.appendChild(opt)
   })
+  // URL preference is UI-only: select it ONLY if it is a real UUID present here.
+  var want = (typeof preferredId === 'string' && UUID_RE.test(preferredId)) ? preferredId : null
+  var hasWant = false
+  for (var w = 0; w < _bbClusters.length; w++) {
+    if (_bbClusters[w].cluster_id === want) { hasWant = true; break }
+  }
+  if (hasWant) { bbClusterSelect.value = want; return }
   var found = false
   for (var i = 0; i < _bbClusters.length; i++) {
     if (_bbClusters[i].cluster_id === keep) { found = true; break }
@@ -806,7 +813,7 @@ function updateBillboardComposer() {
 
   _bbClusters = buildClusterOptions(_unlockedVault)
   bbClusterField.style.display = 'block'
-  bbRenderClusterSelect()
+  bbRenderClusterSelect(clusterFromHash())
 
   if (_bbClusters.length === 0) {
     bbNoCluster.style.display = 'block'
@@ -892,6 +899,17 @@ function serviceFromHash() {
   if (h.charAt(0) === '#') h = h.slice(1)
   try {
     return new URLSearchParams(h).get('service')
+  } catch (err) {
+    return null
+  }
+}
+
+// UI-only Cluster preference from the URL — never an authorization.
+function clusterFromHash() {
+  var h = location.hash || ''
+  if (h.charAt(0) === '#') h = h.slice(1)
+  try {
+    return new URLSearchParams(h).get('cluster')
   } catch (err) {
     return null
   }
