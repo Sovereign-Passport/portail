@@ -431,26 +431,27 @@ function buildClusterOptions(vault) {
     if (host && c.node_name && !vineByHost[host]) vineByHost[host] = c.node_name
   })
 
-  function add(clusterId, name, endpoint, status, credentialId) {
+  function add(clusterId, name, endpoint, status, credentialId, allowNoEndpoint) {
     if (!clusterId || !UUID_RE.test(clusterId)) return        // canonical UUID only
     if (status === 'revoked' || status === 'removed') return
+    var host = bbEndpointHost(endpoint)
     var cur = byId[clusterId]
     if (cur) {
-      // Enrich an existing Cluster even when this source carries no endpoint.
+      // Enrich an existing Cluster (name / credential / endpoint).
       if (!cur.name && name) cur.name = name
       if (!cur.credential_id && credentialId) cur.credential_id = credentialId
+      if (!cur.endpoint && host) cur.endpoint = host
       return
     }
-    var host = bbEndpointHost(endpoint)
-    if (!host) return                                         // new Cluster without endpoint → ignore
+    if (!host && !allowNoEndpoint) return                     // joined Cluster without endpoint → ignore
     byId[clusterId] = {
-      cluster_id: clusterId, name: name || null, endpoint: host,
+      cluster_id: clusterId, name: name || null, endpoint: host || null,
       status: status || 'unknown', credential_id: credentialId || null,
     }
   }
 
   ;(vault.ownClusters || []).forEach(function(c) {
-    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null)
+    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null, true)
   })
   ;(vault.memberships || []).forEach(function(m) {
     add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, null)
@@ -559,11 +560,31 @@ function renderBillboardPosts(posts) {
   })
 }
 
+/** A Cluster with no stored endpoint has no Switchboard — never invent one. */
+function bbRenderDisconnected() {
+  bbHideStatus()
+  bbList.innerHTML = ''
+  var p = document.createElement('p')
+  p.className = 'bb-empty'
+  p.textContent = 'Cluster services are not connected yet.'
+  bbList.appendChild(p)
+}
+
 /** Read the selected Cluster: DID-signed proof + Switchboard cluster/list. */
 function loadClusterBillboard() {
   var cluster = bbSelectedCluster()
   if (!_unlockedVault || !cluster) return Promise.resolve()
 
+  if (!cluster.endpoint) {
+    // No endpoint → no fetch at all, no creation, clear notice.
+    bbNewBtn.style.display = 'none'
+    bbHideForm()
+    bbConfirm.style.display = 'none'
+    bbRenderDisconnected()
+    return Promise.resolve()
+  }
+
+  bbNewBtn.style.display = 'inline-block'
   bbHideStatus()
   bbList.innerHTML = ''
   var loading = document.createElement('p')
@@ -795,8 +816,7 @@ function updateBillboardComposer() {
   }
   bbNoCluster.style.display = 'none'
   bbCreateHint.style.display = 'none'
-  bbNewBtn.style.display = 'inline-block'
-  loadClusterBillboard()
+  loadClusterBillboard()   // sets New post per the selected Cluster's endpoint
 }
 
 bbRefreshBtn.addEventListener('click', loadClusterBillboard)
