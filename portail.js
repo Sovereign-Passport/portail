@@ -349,54 +349,158 @@ pwInput.addEventListener('keydown', function(e) {
 })
 
 // ═════════════════════════════════════════════════════════════════════════
-// SECTION 5 — BILLBOARD (public read + signed public create)
+// SECTION 5 — BILLBOARD (Cluster selected from the unlocked Passport vault)
 //
-// Public read needs NO Passport. Creation needs an UNLOCKED Passport (the
-// Ed25519 private key is in memory). The only URL inputs are the `service`
-// fragment and `?embed=1` — never a DID, role or authorization.
+// Clusters come ONLY from canonical cluster_id (UUID) sources; Vines,
+// Vignards and legacy memberships are ignored. The Switchboard host is the
+// Cluster's own stored endpoint — never DEFAULT_HOST. Reading and creating
+// both require the unlocked Passport (Ed25519 key in memory).
 // ═════════════════════════════════════════════════════════════════════════
 
-var bbRefreshBtn    = document.getElementById('bbRefreshBtn')
-var bbNewBtn        = document.getElementById('bbNewBtn')
-var bbCreateHint    = document.getElementById('bbCreateHint')
-var bbStatus        = document.getElementById('bbStatus')
-var bbList          = document.getElementById('bbList')
-var bbForm          = document.getElementById('bbForm')
-var bbTitle         = document.getElementById('bbTitle')
-var bbBody          = document.getElementById('bbBody')
-var bbExpires       = document.getElementById('bbExpires')
-var bbTitleCount    = document.getElementById('bbTitleCount')
-var bbBodyCount     = document.getElementById('bbBodyCount')
-var bbFormError     = document.getElementById('bbFormError')
-var bbReviewBtn     = document.getElementById('bbReviewBtn')
-var bbCancelBtn     = document.getElementById('bbCancelBtn')
-var bbConfirm       = document.getElementById('bbConfirm')
-var bbConfirmTitle  = document.getElementById('bbConfirmTitle')
-var bbConfirmBody   = document.getElementById('bbConfirmBody')
-var bbConfirmExp    = document.getElementById('bbConfirmExp')
-var bbConfirmExpRow = document.getElementById('bbConfirmExpRow')
-var bbConfirmError  = document.getElementById('bbConfirmError')
-var bbBackBtn       = document.getElementById('bbBackBtn')
-var bbSignBtn       = document.getElementById('bbSignBtn')
+var bbClusterSelect  = document.getElementById('bbClusterSelect')
+var bbClusterField   = document.getElementById('bbClusterField')
+var bbNoCluster      = document.getElementById('bbNoCluster')
+var bbRefreshBtn     = document.getElementById('bbRefreshBtn')
+var bbNewBtn         = document.getElementById('bbNewBtn')
+var bbCreateHint     = document.getElementById('bbCreateHint')
+var bbStatus         = document.getElementById('bbStatus')
+var bbList           = document.getElementById('bbList')
+var bbForm           = document.getElementById('bbForm')
+var bbTitle          = document.getElementById('bbTitle')
+var bbBody           = document.getElementById('bbBody')
+var bbExpires        = document.getElementById('bbExpires')
+var bbTitleCount     = document.getElementById('bbTitleCount')
+var bbBodyCount      = document.getElementById('bbBodyCount')
+var bbFormError      = document.getElementById('bbFormError')
+var bbReviewBtn      = document.getElementById('bbReviewBtn')
+var bbCancelBtn      = document.getElementById('bbCancelBtn')
+var bbConfirm        = document.getElementById('bbConfirm')
+var bbConfirmCluster = document.getElementById('bbConfirmCluster')
+var bbConfirmTitle   = document.getElementById('bbConfirmTitle')
+var bbConfirmBody    = document.getElementById('bbConfirmBody')
+var bbConfirmExp     = document.getElementById('bbConfirmExp')
+var bbConfirmExpRow  = document.getElementById('bbConfirmExpRow')
+var bbConfirmError   = document.getElementById('bbConfirmError')
+var bbBackBtn        = document.getElementById('bbBackBtn')
+var bbSignBtn        = document.getElementById('bbSignBtn')
 
 // Signed credential reused byte-for-byte across retries in one attempt.
 var _bbPending = null
+// Cluster the confirmation card was built for (guards a post-confirmation change).
+var _bbConfirmClusterId = null
+// Current Cluster options (canonical UUID only).
+var _bbClusters = []
 
-/** Switchboard host: the vine of the unlocked Passport, else the welcome door. */
-function bbHost() {
-  var cred = null
-  if (_unlockedVault && _unlockedVault.credentials) {
-    var list = _unlockedVault.credentials.filter(function(c) {
-      return c.type === 'MembershipCredential' && !c.revoked
-    })
-    cred = list.length ? list[0] : null
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Normalize an endpoint to a scheme+host origin, or null. No name→id mapping. */
+function bbEndpointHost(raw) {
+  if (!raw) return null
+  var s = String(raw).trim()
+  if (!s) return null
+  if (!/^https?:\/\//i.test(s)) {
+    var local = /^localhost(:\d+)?(\/|$)/i.test(s) ||
+                /^127\.0\.0\.1(:\d+)?(\/|$)/i.test(s) ||
+                /^\[::1\](:\d+)?(\/|$)/i.test(s)
+    s = (local ? 'http://' : 'https://') + s
   }
-  return switchboardHostFor(cred)
+  try {
+    var u = new URL(s)
+    return u.protocol + '//' + u.host
+  } catch (e) { return null }
 }
 
-/** One POST to the Switchboard. Never exposes a key/password/vault. */
-function bbSwitch(body) {
-  return fetch(bbHost() + '/api/switch', {
+/**
+ * Build the Cluster list from canonical sources, merged ONLY by cluster_id
+ * (UUID). Ignores Vines/Vignards, legacy memberships without cluster_id,
+ * Clusters without a usable endpoint, and revoked/removed memberships.
+ * The displayed label is dynamic: "<cluster name> — <vine name>" when the
+ * vine name is found by endpoint match, else "<cluster name> — My Cluster".
+ */
+function buildClusterOptions(vault) {
+  var byId = {}
+
+  // Vine name by endpoint — dynamic, matched from vine credentials only.
+  var vineByHost = {}
+  var creds = (vault && vault.credentials) || []
+  creds.forEach(function(c) {
+    if (c.type !== 'MembershipCredential') return
+    if (c.scope === 'cluster' || c.scope === 'vignard') return
+    if (c.revoked) return
+    var host = bbEndpointHost(c.offer_endpoint || c.vine_endpoint)
+    if (host && c.node_name && !vineByHost[host]) vineByHost[host] = c.node_name
+  })
+
+  function add(clusterId, name, endpoint, status, credentialId) {
+    if (!clusterId || !UUID_RE.test(clusterId)) return        // canonical UUID only
+    if (status === 'revoked' || status === 'removed') return
+    var cur = byId[clusterId]
+    if (cur) {
+      // Enrich an existing Cluster even when this source carries no endpoint.
+      if (!cur.name && name) cur.name = name
+      if (!cur.credential_id && credentialId) cur.credential_id = credentialId
+      return
+    }
+    var host = bbEndpointHost(endpoint)
+    if (!host) return                                         // new Cluster without endpoint → ignore
+    byId[clusterId] = {
+      cluster_id: clusterId, name: name || null, endpoint: host,
+      status: status || 'unknown', credential_id: credentialId || null,
+    }
+  }
+
+  ;(vault.ownClusters || []).forEach(function(c) {
+    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null)
+  })
+  ;(vault.memberships || []).forEach(function(m) {
+    add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, null)
+  })
+  creds.forEach(function(c) {
+    if (c.type === 'MembershipCredential' && c.scope === 'cluster') {
+      add(c.cluster_id, c.cluster_name, c.vine_endpoint, c.status, c.id)
+    }
+  })
+
+  var out = []
+  Object.keys(byId).forEach(function(k) {
+    var o = byId[k]
+    var vineName = vineByHost[o.endpoint] || null
+    var clusterName = o.name || o.cluster_id
+    o.label = clusterName + ' — ' + (vineName || 'My Cluster')
+    out.push(o)
+  })
+  return out
+}
+
+function bbSelectedCluster() {
+  var id = bbClusterSelect.value
+  for (var i = 0; i < _bbClusters.length; i++) {
+    if (_bbClusters[i].cluster_id === id) return _bbClusters[i]
+  }
+  return null
+}
+
+/** Rebuild the <select> from _bbClusters, preserving the current selection. */
+function bbRenderClusterSelect() {
+  var keep = bbClusterSelect.value
+  bbClusterSelect.innerHTML = ''
+  _bbClusters.forEach(function(c) {
+    var opt = document.createElement('option')
+    opt.value = c.cluster_id
+    opt.textContent = c.label
+    bbClusterSelect.appendChild(opt)
+  })
+  var found = false
+  for (var i = 0; i < _bbClusters.length; i++) {
+    if (_bbClusters[i].cluster_id === keep) { found = true; break }
+  }
+  if (found) bbClusterSelect.value = keep
+  else if (_bbClusters.length) bbClusterSelect.value = _bbClusters[0].cluster_id
+}
+
+/** One POST to a Cluster's Switchboard. Host is the Cluster endpoint only. */
+function bbSwitch(host, body) {
+  return fetch(host + '/api/switch', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
@@ -422,7 +526,7 @@ function renderBillboardPosts(posts) {
   if (!posts || posts.length === 0) {
     var empty = document.createElement('p')
     empty.className = 'bb-empty'
-    empty.textContent = 'No public announcements yet.'
+    empty.textContent = 'No announcements yet.'
     bbList.appendChild(empty)
     return
   }
@@ -455,8 +559,11 @@ function renderBillboardPosts(posts) {
   })
 }
 
-/** Public read via Switchboard (service=billboard, action=public). */
-function loadBillboardPublic() {
+/** Read the selected Cluster: DID-signed proof + Switchboard cluster/list. */
+function loadClusterBillboard() {
+  var cluster = bbSelectedCluster()
+  if (!_unlockedVault || !cluster) return Promise.resolve()
+
   bbHideStatus()
   bbList.innerHTML = ''
   var loading = document.createElement('p')
@@ -464,7 +571,18 @@ function loadBillboardPublic() {
   loading.textContent = 'Loading…'
   bbList.appendChild(loading)
 
-  return bbSwitch({ service: 'billboard', action: 'public' })
+  var did = _unlockedVault.identity.id
+  var timestamp = Date.now()
+  var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
+
+  return importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function(privateKey) { return edSign(privateKey, JSON.stringify(proof)) })
+    .then(function(signature) {
+      return bbSwitch(cluster.endpoint, {
+        service: 'billboard', action: 'cluster/list',
+        data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+      })
+    })
     .then(function(resp) {
       return resp.text().then(function(t) {
         var data = null
@@ -489,7 +607,7 @@ function loadBillboardPublic() {
       retry.type = 'button'
       retry.className = 'btn btn-ghost'
       retry.textContent = 'Retry'
-      retry.addEventListener('click', loadBillboardPublic)
+      retry.addEventListener('click', loadClusterBillboard)
       bbList.appendChild(retry)
     })
 }
@@ -540,8 +658,12 @@ function bbValidate() {
 function bbReview() {
   var err = bbValidate()
   if (err) { bbShowFormError(err); return }
+  var cluster = bbSelectedCluster()
+  if (!cluster) { bbShowFormError('No Cluster selected.'); return }
   _bbPending = null   // a new confirmation → a fresh id/signature
+  _bbConfirmClusterId = cluster.cluster_id
   bbFormError.style.display = 'none'
+  bbConfirmCluster.textContent = cluster.label
   bbConfirmTitle.textContent = bbTitle.value
   bbConfirmBody.textContent  = bbBody.value
   if (bbExpires.value) {
@@ -560,7 +682,7 @@ function bbReview() {
  *   id, type, action, actor_did, post_id, scope, cluster_id, version,
  *   title, body, expires_at, issued_at  →  signature appended last.
  */
-function bbBuildCredential() {
+function bbBuildCredential(cluster) {
   var expIso = null
   if (bbExpires.value) {
     expIso = new Date(Date.parse(bbExpires.value)).toISOString()
@@ -571,8 +693,8 @@ function bbBuildCredential() {
     action:     'create',
     actor_did:  _unlockedVault.identity.id,
     post_id:    uuid(),
-    scope:      'public',
-    cluster_id: null,
+    scope:      'cluster',
+    cluster_id: cluster.cluster_id,
     version:    1,
     title:      bbTitle.value,
     body:       bbBody.value,
@@ -590,15 +712,25 @@ function bbBuildCredential() {
 function bbPublish() {
   if (!_unlockedVault) { updateBillboardComposer(); return }
   if (bbSignBtn.disabled) return
+
+  var cluster = bbSelectedCluster()
+  // Refuse if the Cluster changed after the confirmation was shown.
+  if (!cluster || !_bbConfirmClusterId || cluster.cluster_id !== _bbConfirmClusterId) {
+    bbConfirmError.textContent = 'The selected Cluster changed — review again before signing.'
+    bbConfirmError.className = 'msg show error'
+    bbConfirmError.style.display = 'block'
+    return
+  }
+
   bbSignBtn.disabled = true
   bbSignBtn.textContent = 'Publishing…'
   bbConfirmError.style.display = 'none'
 
-  var build = _bbPending ? Promise.resolve(_bbPending) : bbBuildCredential()
+  var build = _bbPending ? Promise.resolve(_bbPending) : bbBuildCredential(cluster)
 
   build.then(function(cred) {
     _bbPending = cred   // same id/signature reused on retry
-    return bbSwitch({ service: 'billboard', action: 'action', data: cred })
+    return bbSwitch(cluster.endpoint, { service: 'billboard', action: 'action', data: cred })
   }).then(function(resp) {
     return resp.text().then(function(t) {
       var data = null
@@ -618,7 +750,7 @@ function bbPublish() {
     bbExpires.value = ''
     bbUpdateCounts()
     // Show the success message after the list reload (which clears status).
-    return loadBillboardPublic().then(function() {
+    return loadClusterBillboard().then(function() {
       bbShowStatus('Announcement published.')
     })
   }).catch(function(e) {
@@ -632,18 +764,42 @@ function bbPublish() {
   })
 }
 
-/** Creation is offered only when the Passport is unlocked. */
+/** Rebuild the Cluster selector + gating. Called on unlock and tab activation. */
 function updateBillboardComposer() {
   var unlocked = !!_unlockedVault
-  bbNewBtn.style.display    = unlocked ? 'inline-block' : 'none'
-  bbCreateHint.style.display = unlocked ? 'none' : 'block'
+  bbConfirm.style.display = 'none'
+  bbHideForm()
+  bbHideStatus()
+  bbList.innerHTML = ''
+
   if (!unlocked) {
-    bbHideForm()
-    bbConfirm.style.display = 'none'
+    _bbClusters = []
+    bbClusterField.style.display = 'none'
+    bbNoCluster.style.display = 'none'
+    bbCreateHint.textContent = 'Open your Passport to publish'
+    bbCreateHint.style.display = 'block'
+    bbNewBtn.style.display = 'none'
+    bbRenderClusterSelect()
+    return
   }
+
+  _bbClusters = buildClusterOptions(_unlockedVault)
+  bbClusterField.style.display = 'block'
+  bbRenderClusterSelect()
+
+  if (_bbClusters.length === 0) {
+    bbNoCluster.style.display = 'block'
+    bbCreateHint.style.display = 'none'
+    bbNewBtn.style.display = 'none'
+    return
+  }
+  bbNoCluster.style.display = 'none'
+  bbCreateHint.style.display = 'none'
+  bbNewBtn.style.display = 'inline-block'
+  loadClusterBillboard()
 }
 
-bbRefreshBtn.addEventListener('click', loadBillboardPublic)
+bbRefreshBtn.addEventListener('click', loadClusterBillboard)
 bbNewBtn.addEventListener('click', bbShowForm)
 bbCancelBtn.addEventListener('click', bbHideForm)
 bbReviewBtn.addEventListener('click', bbReview)
@@ -652,6 +808,17 @@ bbBackBtn.addEventListener('click', function() {
   bbForm.style.display = 'block'
 })
 bbSignBtn.addEventListener('click', bbPublish)
+bbClusterSelect.addEventListener('change', function() {
+  // A Cluster change invalidates any memoized/confirmed credential.
+  _bbPending = null
+  _bbConfirmClusterId = null
+  if (bbConfirm.style.display === 'block') {
+    bbConfirm.style.display = 'none'
+    bbForm.style.display = 'block'
+  }
+  bbHideStatus()
+  loadClusterBillboard()
+})
 bbTitle.addEventListener('input', function() { bbUpdateCounts(); _bbPending = null })
 bbBody.addEventListener('input',  function() { bbUpdateCounts(); _bbPending = null })
 bbExpires.addEventListener('input', function() { _bbPending = null })
@@ -697,7 +864,6 @@ function activateService(name) {
 
   if (target === 'billboard') {
     updateBillboardComposer()
-    loadBillboardPublic()
   }
 }
 
