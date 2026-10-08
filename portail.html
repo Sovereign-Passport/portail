@@ -82,6 +82,7 @@
 
         <!-- Composer — always scoped to the selected Cluster -->
         <form id="bbForm" class="bb-form" style="display:none;" onsubmit="return false;">
+          <p class="bb-note" id="bbFormMode" style="display:none;"></p>
           <div class="field">
             <label>Title <span class="bb-count" id="bbTitleCount">0 / 160</span></label>
             <input id="bbTitle" class="did-input" type="text" maxlength="160" autocomplete="off">
@@ -103,7 +104,8 @@
 
         <!-- Confirmation card — required before signing -->
         <div id="bbConfirm" class="bb-confirm" style="display:none;">
-          <p class="cred-type">Confirm announcement</p>
+          <p class="cred-type" id="bbConfirmType">Confirm announcement</p>
+          <p class="bb-note" id="bbConfirmWarn" style="display:none;"></p>
           <div class="bb-confirm-row"><span>Cluster</span><strong id="bbConfirmCluster">—</strong></div>
           <div class="bb-confirm-row"><span>Title</span><strong id="bbConfirmTitle"></strong></div>
           <div class="bb-confirm-row"><span>Message</span><div id="bbConfirmBody"></div></div>

@@ -351,6 +351,8 @@ html.embed .panel { margin-bottom: 0; }
 .bb-post-title { font-size: 15px; color: var(--text); margin-bottom: 6px; font-weight: 400; }
 .bb-post-body { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .bb-post-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 10.5px; color: var(--text-dim); }
+.bb-post-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.bb-post-actions .btn { width: auto; padding: 6px 14px; font-size: var(--text-xs); }
 .bb-form { margin-top: 8px; }
 .bb-count { float: right; font-size: 10px; color: var(--text-dim); letter-spacing: 0; text-transform: none; }
 .bb-textarea {

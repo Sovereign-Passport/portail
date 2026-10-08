@@ -376,6 +376,9 @@ var bbReviewBtn      = document.getElementById('bbReviewBtn')
 var bbCancelBtn      = document.getElementById('bbCancelBtn')
 var bbConfirm        = document.getElementById('bbConfirm')
 var bbConfirmCluster = document.getElementById('bbConfirmCluster')
+var bbConfirmType    = document.getElementById('bbConfirmType')
+var bbConfirmWarn    = document.getElementById('bbConfirmWarn')
+var bbFormMode       = document.getElementById('bbFormMode')
 var bbConfirmTitle   = document.getElementById('bbConfirmTitle')
 var bbConfirmBody    = document.getElementById('bbConfirmBody')
 var bbConfirmExp     = document.getElementById('bbConfirmExp')
@@ -388,6 +391,8 @@ var bbSignBtn        = document.getElementById('bbSignBtn')
 var _bbPending = null
 // Cluster the confirmation card was built for (guards a post-confirmation change).
 var _bbConfirmClusterId = null
+// Current composer intent: { action:'create'|'update'|'archive', post }.
+var _bbMode = null
 // Current Cluster options (canonical UUID only).
 var _bbClusters = []
 
@@ -563,6 +568,29 @@ function renderBillboardPosts(posts) {
       meta.appendChild(exp)
     }
     card.appendChild(meta)
+
+    // Edit / Archive — author of the post only (see bbCanEditPost).
+    if (bbCanEditPost(p)) {
+      var actions = document.createElement('div')
+      actions.className = 'bb-post-actions'
+
+      var editBtn = document.createElement('button')
+      editBtn.type = 'button'
+      editBtn.className = 'btn btn-ghost'
+      editBtn.textContent = 'Edit'
+      editBtn.addEventListener('click', function() { bbStartEdit(p) })
+      actions.appendChild(editBtn)
+
+      var archBtn = document.createElement('button')
+      archBtn.type = 'button'
+      archBtn.className = 'btn btn-ghost'
+      archBtn.textContent = 'Archive'
+      archBtn.addEventListener('click', function() { bbStartArchive(p) })
+      actions.appendChild(archBtn)
+
+      card.appendChild(actions)
+    }
+
     bbList.appendChild(card)
   })
 }
@@ -645,20 +673,80 @@ function bbUpdateCounts() {
   bbBodyCount.textContent  = (bbBody.value  ? bbBody.value.length  : 0) + ' / 5000'
 }
 
+/**
+ * Edit/Archive authority. Author-only for now: buildClusterOptions() does not
+ * expose a reliable "approved issuer of this Cluster" flag for the vault DID,
+ * so issuer rights are NOT inferred here (never invented, never from a label
+ * or the URL). Reported as an open gap.
+ */
+function bbCanEditPost(post) {
+  if (!_unlockedVault || !post || !post.post_id || !post.author_did) return false
+  return post.author_did === _unlockedVault.identity.id
+}
+
+/** ISO date → value for <input type="datetime-local"> (local time). */
+function bbToLocalInput(iso) {
+  if (!iso) return ''
+  var d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  var p = function(n) { return (n < 10 ? '0' : '') + n }
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
 function bbHideForm() {
   bbForm.style.display = 'none'
   bbFormError.style.display = 'none'
   bbFormError.textContent = ''
-  _bbPending = null   // Cancel/close invalidates any memoized credential
+  bbFormMode.style.display = 'none'
+  _bbPending = null           // Cancel/close invalidates any memoized credential
+  _bbConfirmClusterId = null
+  _bbMode = null
 }
 
+/** New post (create) — fresh, empty composer. */
 function bbShowForm() {
   bbConfirm.style.display = 'none'
   bbConfirmError.style.display = 'none'
   bbForm.style.display = 'block'
+  bbFormMode.style.display = 'none'
+  bbTitle.value = ''
+  bbBody.value = ''
+  bbExpires.value = ''
   _bbPending = null
+  _bbMode = { action: 'create', post: null }
   bbUpdateCounts()
   bbTitle.focus()
+}
+
+/** Edit an existing post — prefilled composer, same scope/cluster/post/actor. */
+function bbStartEdit(post) {
+  if (!_unlockedVault || !bbCanEditPost(post)) return
+  bbForm.style.display = 'block'
+  bbConfirm.style.display = 'none'
+  bbConfirmError.style.display = 'none'
+  bbFormError.style.display = 'none'
+  bbFormMode.textContent = 'Editing your announcement (v' + post.version + ')'
+  bbFormMode.style.display = 'block'
+  bbTitle.value = post.title || ''
+  bbBody.value  = post.body || ''
+  bbExpires.value = bbToLocalInput(post.expires_at)
+  _bbPending = null
+  _bbMode = { action: 'update', post: post }
+  bbUpdateCounts()
+  bbTitle.focus()
+}
+
+/** Archive — explicit confirmation; content stays byte-identical. */
+function bbStartArchive(post) {
+  if (!_unlockedVault || !bbCanEditPost(post)) return
+  var cluster = bbSelectedCluster()
+  bbForm.style.display = 'none'
+  bbFormError.style.display = 'none'
+  _bbPending = null
+  _bbMode = { action: 'archive', post: post }
+  _bbConfirmClusterId = cluster ? cluster.cluster_id : null
+  _bbShowConfirm(cluster, post.title, post.body, post.expires_at, 'archive')
 }
 
 function bbShowFormError(msg) {
@@ -684,22 +772,44 @@ function bbValidate() {
 }
 
 function bbReview() {
+  var mode = _bbMode || { action: 'create', post: null }
   var err = bbValidate()
   if (err) { bbShowFormError(err); return }
   var cluster = bbSelectedCluster()
   if (!cluster) { bbShowFormError('No Cluster selected.'); return }
   _bbPending = null   // a new confirmation → a fresh id/signature
   _bbConfirmClusterId = cluster.cluster_id
+  var expIso = bbExpires.value ? new Date(Date.parse(bbExpires.value)).toISOString() : null
   bbFormError.style.display = 'none'
-  bbConfirmCluster.textContent = cluster.label
-  bbConfirmTitle.textContent = bbTitle.value
-  bbConfirmBody.textContent  = bbBody.value
-  if (bbExpires.value) {
+  _bbShowConfirm(cluster, bbTitle.value, bbBody.value, expIso, mode.action)
+}
+
+/** Populate + show the confirmation card for the given action. */
+function _bbShowConfirm(cluster, title, body, expIso, action) {
+  var isUpdate  = action === 'update'
+  var isArchive = action === 'archive'
+  bbConfirmType.textContent = isArchive ? 'Confirm archive'
+                            : isUpdate  ? 'Confirm update'
+                            :             'Confirm announcement'
+  bbConfirmCluster.textContent = cluster ? cluster.label : '—'
+  bbConfirmTitle.textContent = title
+  bbConfirmBody.textContent  = body
+  if (expIso) {
     bbConfirmExpRow.style.display = 'flex'
-    bbConfirmExp.textContent = new Date(bbExpires.value).toLocaleString()
+    bbConfirmExp.textContent = new Date(expIso).toLocaleString()
   } else {
     bbConfirmExpRow.style.display = 'none'
   }
+  if (isArchive) {
+    bbConfirmWarn.textContent = 'This archives the announcement and cannot be undone.'
+    bbConfirmWarn.style.display = 'block'
+  } else {
+    bbConfirmWarn.style.display = 'none'
+    bbConfirmWarn.textContent = ''
+  }
+  bbSignBtn.textContent = isArchive ? 'Sign & archive'
+                        : isUpdate  ? 'Sign & update'
+                        :             'Sign & publish'
   bbConfirmError.style.display = 'none'
   bbForm.style.display = 'none'
   bbConfirm.style.display = 'block'
@@ -711,21 +821,43 @@ function bbReview() {
  *   title, body, expires_at, issued_at  →  signature appended last.
  */
 function bbBuildCredential(cluster) {
-  var expIso = null
-  if (bbExpires.value) {
-    expIso = new Date(Date.parse(bbExpires.value)).toISOString()
+  var mode   = _bbMode || { action: 'create', post: null }
+  var action = mode.action
+  var post   = mode.post
+  var title, body, expIso, postId, version
+
+  if (action === 'archive' && post) {
+    // Archive keeps the current content byte-identical.
+    title   = post.title
+    body    = post.body
+    expIso  = post.expires_at || null
+    postId  = post.post_id
+    version = post.version + 1
+  } else if (action === 'update' && post) {
+    title   = bbTitle.value
+    body    = bbBody.value
+    expIso  = bbExpires.value ? new Date(Date.parse(bbExpires.value)).toISOString() : null
+    postId  = post.post_id
+    version = post.version + 1
+  } else {
+    title   = bbTitle.value
+    body    = bbBody.value
+    expIso  = bbExpires.value ? new Date(Date.parse(bbExpires.value)).toISOString() : null
+    postId  = uuid()
+    version = 1
   }
+
   var payload = {
     id:         uuid(),
     type:       'BillboardAction',
-    action:     'create',
+    action:     action,
     actor_did:  _unlockedVault.identity.id,
-    post_id:    uuid(),
+    post_id:    postId,
     scope:      'cluster',
     cluster_id: cluster.cluster_id,
-    version:    1,
-    title:      bbTitle.value,
-    body:       bbBody.value,
+    version:    version,
+    title:      title,
+    body:       body,
     expires_at: expIso,
     issued_at:  nowIso(),
   }
@@ -749,9 +881,20 @@ function bbPublish() {
     bbConfirmError.style.display = 'block'
     return
   }
+  var mode   = _bbMode || { action: 'create', post: null }
+  var action = mode.action
+  if ((action === 'update' || action === 'archive') && (!mode.post || !mode.post.post_id)) {
+    bbConfirmError.textContent = 'Nothing to sign — review again.'
+    bbConfirmError.className = 'msg show error'
+    bbConfirmError.style.display = 'block'
+    return
+  }
+  var label = action === 'archive' ? 'Sign & archive'
+            : action === 'update'  ? 'Sign & update'
+            :                        'Sign & publish'
 
   bbSignBtn.disabled = true
-  bbSignBtn.textContent = 'Publishing…'
+  bbSignBtn.textContent = 'Signing…'
   bbConfirmError.style.display = 'none'
 
   var build = _bbPending ? Promise.resolve(_bbPending) : bbBuildCredential(cluster)
@@ -779,16 +922,29 @@ function bbPublish() {
     bbUpdateCounts()
     // Show the success message after the list reload (which clears status).
     return loadClusterBillboard().then(function() {
-      bbShowStatus('Announcement published.')
+      bbShowStatus(action === 'archive' ? 'Announcement archived.'
+                 : action === 'update'  ? 'Announcement updated.'
+                 :                        'Announcement published.')
     })
   }).catch(function(e) {
+    if ((e.message || '').indexOf('STALE_VERSION') > -1) {
+      // The post moved on — reload the list and ask to review again.
+      _bbPending = null
+      bbConfirm.style.display = 'none'
+      bbHideForm()
+      return loadClusterBillboard().then(function() {
+        bbShowStatus('This post changed. Review it again.')
+      })
+    }
     // Failure keeps the form values and the signed credential (same-id retry).
-    bbConfirmError.textContent = 'Could not publish: ' + e.message
+    bbConfirmError.textContent = 'Could not ' +
+      (action === 'archive' ? 'archive' : action === 'update' ? 'update' : 'publish') +
+      ': ' + e.message
     bbConfirmError.className = 'msg show error'
     bbConfirmError.style.display = 'block'
   }).then(function() {
     bbSignBtn.disabled = false
-    bbSignBtn.textContent = 'Sign & publish'
+    bbSignBtn.textContent = label
   })
 }
 
@@ -831,18 +987,22 @@ bbNewBtn.addEventListener('click', bbShowForm)
 bbCancelBtn.addEventListener('click', bbHideForm)
 bbReviewBtn.addEventListener('click', bbReview)
 bbBackBtn.addEventListener('click', function() {
+  var mode = _bbMode || { action: 'create', post: null }
+  _bbPending = null
+  if (mode.action === 'archive') {
+    // Archive has no editable form — return to the list.
+    bbConfirm.style.display = 'none'
+    bbHideForm()
+    return
+  }
   bbConfirm.style.display = 'none'
   bbForm.style.display = 'block'
 })
 bbSignBtn.addEventListener('click', bbPublish)
 bbClusterSelect.addEventListener('change', function() {
-  // A Cluster change invalidates any memoized/confirmed credential.
-  _bbPending = null
-  _bbConfirmClusterId = null
-  if (bbConfirm.style.display === 'block') {
-    bbConfirm.style.display = 'none'
-    bbForm.style.display = 'block'
-  }
+  // A Cluster change invalidates any memoized/confirmed credential and mode.
+  bbConfirm.style.display = 'none'
+  bbHideForm()
   bbHideStatus()
   loadClusterBillboard()
 })
