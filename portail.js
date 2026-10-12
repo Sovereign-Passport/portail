@@ -6,9 +6,10 @@
  * Crypto primitives identical to passport.crypto.js. WebCrypto only.
  *
  * The switchboard host is derived from the membership credential's
- * issuer did:web (your passport talks to YOUR vine). DEFAULT_HOST is
- * only the fallback for bare passports (no vine credential yet) —
- * the network's welcome door.
+ * issuer did:web (your passport talks to YOUR vine). SPID_BOOTSTRAP_HOST
+ * is the SPID/Switchboard entry point for bare passports and for owned
+ * Clusters — it is NOT a relation with any Vine and is NEVER written into
+ * vine_endpoint or Cluster metadata.
  *
  * ES2017 target. Forbidden: ?. ?? 0n 600_000 catch{} {...obj}
  */
@@ -17,7 +18,9 @@
 // SECTION 1 — CRYPTO (identical to passport.crypto.js primitives)
 // ═════════════════════════════════════════════════════════════════════════
 
-var DEFAULT_HOST = 'https://mdusl.sovereign-passport.id'
+// SPID/Switchboard entry point (alpha node). NOT a relation with a Vine;
+// never persisted into vine_endpoint, ClusterVineRelation or Cluster metadata.
+var SPID_BOOTSTRAP_HOST = 'https://mdusl.sovereign-passport.id'
 var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
 var PBKDF2_ITER = 600000
 
@@ -175,7 +178,7 @@ function switchboardHostFor(credential) {
     domain = domain.split(':').join('/')
     return 'https://' + domain
   }
-  return DEFAULT_HOST
+  return SPID_BOOTSTRAP_HOST
 }
 
 function requestAccess(unlockedVault) {
@@ -353,8 +356,9 @@ pwInput.addEventListener('keydown', function(e) {
 //
 // Clusters come ONLY from canonical cluster_id (UUID) sources; Vines,
 // Vignards and legacy memberships are ignored. The Switchboard host is the
-// Cluster's own stored endpoint — never DEFAULT_HOST. Reading and creating
-// both require the unlocked Passport (Ed25519 key in memory).
+// Cluster's own stored endpoint for JOINED Clusters, and the SPID/Switchboard
+// entry point (SPID_BOOTSTRAP_HOST) for OWNED Clusters — never a Vine relation.
+// Reading and creating both require the unlocked Passport (Ed25519 key).
 // ═════════════════════════════════════════════════════════════════════════
 
 var bbClusterSelect  = document.getElementById('bbClusterSelect')
@@ -416,6 +420,29 @@ function bbEndpointHost(raw) {
 }
 
 /**
+ * Find the EXACT ownership proof for a Cluster in the vault — never rebuilt,
+ * never modified: a ClusterOwnerCredential, or a legacy FounderCredential
+ * (Cluster) matching the same cluster_id and signed by the vault DID.
+ * @returns {Object|null}
+ */
+function ownerProofFor(vault, clusterId, did) {
+  if (!vault || !clusterId || !did) return null
+  var creds = vault.credentials || []
+  for (var i = 0; i < creds.length; i++) {
+    var c = creds[i]
+    if (c.type === 'ClusterOwnerCredential') {
+      if (c.cluster_id === clusterId && c.owner_did === did) return c
+    } else if (c.type === 'FounderCredential') {
+      var cid    = c.cluster_id || (c.claims && c.claims.cluster_id)
+      var signer = c.issuer_did
+      var isClusterFounder = !!(c.claims && c.claims.role === 'founder' && c.cluster_id)
+      if (isClusterFounder && cid === clusterId && signer === did && c.issuer_did === c.subject) return c
+    }
+  }
+  return null
+}
+
+/**
  * Build the Cluster list from canonical sources, merged ONLY by cluster_id
  * (UUID). Ignores Vines/Vignards, legacy memberships without cluster_id,
  * Clusters without a usable endpoint, and revoked/removed memberships.
@@ -436,7 +463,7 @@ function buildClusterOptions(vault) {
     if (host && c.node_name && !vineByHost[host]) vineByHost[host] = c.node_name
   })
 
-  function add(clusterId, name, endpoint, status, credentialId, allowNoEndpoint) {
+  function add(clusterId, name, endpoint, status, credentialId, allowNoEndpoint, owned) {
     if (!clusterId || !UUID_RE.test(clusterId)) return        // canonical UUID only
     if (status === 'revoked' || status === 'removed') return
     var host = bbEndpointHost(endpoint)
@@ -446,33 +473,38 @@ function buildClusterOptions(vault) {
       if (!cur.name && name) cur.name = name
       if (!cur.credential_id && credentialId) cur.credential_id = credentialId
       if (!cur.endpoint && host) cur.endpoint = host
+      if (owned) cur.owned = true
       return
     }
     if (!host && !allowNoEndpoint) return                     // joined Cluster without endpoint → ignore
     byId[clusterId] = {
       cluster_id: clusterId, name: name || null, endpoint: host || null,
       status: status || 'unknown', credential_id: credentialId || null,
+      owned: !!owned,
     }
   }
 
   ;(vault.ownClusters || []).forEach(function(c) {
-    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null, true)
+    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null, true, true)
   })
   ;(vault.memberships || []).forEach(function(m) {
-    add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, null)
+    add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, null, false, false)
   })
   creds.forEach(function(c) {
     if (c.type === 'MembershipCredential' && c.scope === 'cluster') {
-      add(c.cluster_id, c.cluster_name, c.vine_endpoint, c.status, c.id)
+      add(c.cluster_id, c.cluster_name, c.vine_endpoint, c.status, c.id, false, false)
     }
   })
 
+  var vaultDid = (vault && vault.identity && vault.identity.id) || null
   var out = []
   Object.keys(byId).forEach(function(k) {
     var o = byId[k]
     var vineName = vineByHost[o.endpoint] || null
     var clusterName = o.name || o.cluster_id
     o.label = clusterName + ' — ' + (vineName || 'My Cluster')
+    // Owned Clusters carry their exact owner proof (used for the owner sync).
+    if (o.owned) o.ownerProof = ownerProofFor(vault, o.cluster_id, vaultDid)
     out.push(o)
   })
   return out
@@ -605,13 +637,65 @@ function bbRenderDisconnected() {
   bbList.appendChild(p)
 }
 
+/**
+ * Present the Cluster's EXACT owner proof to the SPID/Switchboard entry point
+ * and sync ONLY this Cluster. The proof is sent byte-for-byte as stored in the
+ * vault — never rebuilt, never modified. No vault and no private key are ever
+ * sent: only the public proof, the DID, the nonce and the signature.
+ */
+function bbOwnerSync(cluster) {
+  var did   = _unlockedVault.identity.id
+  var proof = cluster.ownerProof
+  if (!proof) return Promise.reject(new Error('No owner proof found for this Cluster.'))
+
+  var host = SPID_BOOTSTRAP_HOST
+  return fetch(host + '/api/switch/nonce')
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('Could not reach the Switchboard for a nonce.')
+      return resp.json()
+    })
+    .then(function(nd) {
+      var nonce = nd && nd.nonce
+      if (!nonce) throw new Error('Switchboard returned no nonce.')
+      var issued_at = nowIso()
+      // Sign exactly {type,did,nonce,issued_at,proofs,pending}.
+      var base = { type: 'PassportSyncRequest', did: did, nonce: nonce, issued_at: issued_at, proofs: [proof], pending: [] }
+      return importPrivateKey(_unlockedVault.keys.privateKey)
+        .then(function(privateKey) { return edSign(privateKey, JSON.stringify(base)) })
+        .then(function(signature) {
+          var sync = {
+            type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
+            proofs: base.proofs, pending: base.pending, signature: signature,
+          }
+          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+        })
+    })
+    .then(function(resp) {
+      return resp.text().then(function(t) {
+        var data = null
+        try { data = JSON.parse(t) } catch (e) { data = null }
+        if (!resp.ok || !data || data.ok !== true) {
+          var msg = (data && (data.message || data.error)) || ('HTTP ' + resp.status)
+          throw new Error(msg)
+        }
+        return data
+      })
+    })
+    .catch(function(e) { throw new Error('Owner sync failed: ' + e.message) })
+}
+
 /** Read the selected Cluster: DID-signed proof + Switchboard cluster/list. */
 function loadClusterBillboard() {
   var cluster = bbSelectedCluster()
   if (!_unlockedVault || !cluster) return Promise.resolve()
 
-  if (!cluster.endpoint) {
-    // No endpoint → no fetch at all, no creation, clear notice.
+  // Owned Clusters use the SPID/Switchboard entry point (never a Vine
+  // relation). Joined Clusters keep their own verified endpoint.
+  var isOwned = !!cluster.owned
+  var host    = isOwned ? SPID_BOOTSTRAP_HOST : cluster.endpoint
+
+  if (!isOwned && !cluster.endpoint) {
+    // Joined Cluster with no endpoint → no Switchboard at all.
     bbNewBtn.style.display = 'none'
     bbHideForm()
     bbConfirm.style.display = 'none'
@@ -627,45 +711,49 @@ function loadClusterBillboard() {
   loading.textContent = 'Loading…'
   bbList.appendChild(loading)
 
-  var did = _unlockedVault.identity.id
-  var timestamp = Date.now()
-  var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
+  // Owned Cluster: present its exact owner proof to the Switchboard FIRST.
+  var prep = isOwned ? bbOwnerSync(cluster) : Promise.resolve()
 
-  return importPrivateKey(_unlockedVault.keys.privateKey)
-    .then(function(privateKey) { return edSign(privateKey, JSON.stringify(proof)) })
-    .then(function(signature) {
-      return bbSwitch(cluster.endpoint, {
-        service: 'billboard', action: 'cluster/list',
-        data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+  return prep.then(function() {
+    var did = _unlockedVault.identity.id
+    var timestamp = Date.now()
+    var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
+    return importPrivateKey(_unlockedVault.keys.privateKey)
+      .then(function(privateKey) { return edSign(privateKey, JSON.stringify(proof)) })
+      .then(function(signature) {
+        return bbSwitch(host, {
+          service: 'billboard', action: 'cluster/list',
+          data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+        })
       })
+  })
+  .then(function(resp) {
+    return resp.text().then(function(t) {
+      var data = null
+      try { data = JSON.parse(t) } catch (e) { data = null }
+      return { ok: resp.ok, status: resp.status, data: data }
     })
-    .then(function(resp) {
-      return resp.text().then(function(t) {
-        var data = null
-        try { data = JSON.parse(t) } catch (e) { data = null }
-        return { ok: resp.ok, status: resp.status, data: data }
-      })
-    })
-    .then(function(r) {
-      if (!r.ok || !r.data || !Array.isArray(r.data.posts)) {
-        var msg = (r.data && (r.data.message || r.data.error)) || ('HTTP ' + r.status)
-        throw new Error(msg)
-      }
-      renderBillboardPosts(r.data.posts)
-    })
-    .catch(function(e) {
-      bbList.innerHTML = ''
-      var err = document.createElement('p')
-      err.className = 'bb-empty'
-      err.textContent = 'Could not load announcements: ' + e.message
-      bbList.appendChild(err)
-      var retry = document.createElement('button')
-      retry.type = 'button'
-      retry.className = 'btn btn-ghost'
-      retry.textContent = 'Retry'
-      retry.addEventListener('click', loadClusterBillboard)
-      bbList.appendChild(retry)
-    })
+  })
+  .then(function(r) {
+    if (!r.ok || !r.data || !Array.isArray(r.data.posts)) {
+      var msg = (r.data && (r.data.message || r.data.error)) || ('HTTP ' + r.status)
+      throw new Error(msg)
+    }
+    renderBillboardPosts(r.data.posts)
+  })
+  .catch(function(e) {
+    bbList.innerHTML = ''
+    var err = document.createElement('p')
+    err.className = 'bb-empty'
+    err.textContent = 'Could not load announcements: ' + e.message
+    bbList.appendChild(err)
+    var retry = document.createElement('button')
+    retry.type = 'button'
+    retry.className = 'btn btn-ghost'
+    retry.textContent = 'Retry'
+    retry.addEventListener('click', loadClusterBillboard)   // retry → fresh nonce
+    bbList.appendChild(retry)
+  })
 }
 
 function bbUpdateCounts() {
@@ -982,7 +1070,18 @@ function updateBillboardComposer() {
   loadClusterBillboard()   // sets New post per the selected Cluster's endpoint
 }
 
-bbRefreshBtn.addEventListener('click', loadClusterBillboard)
+bbRefreshBtn.addEventListener('click', function() {
+  // Full reload: re-reads the vault, the Clusters, their metadata and the
+  // synced projection. Keep the Billboard service (and the selected Cluster)
+  // in the URL so the active DID/context is restored when still available;
+  // otherwise the boot falls back to the login (unlock) screen.
+  var cluster = bbSelectedCluster()
+  try {
+    location.hash = '#service=billboard' +
+      (cluster ? '&cluster=' + encodeURIComponent(cluster.cluster_id) : '')
+  } catch (e) { /* non-fatal */ }
+  window.location.reload()
+})
 bbNewBtn.addEventListener('click', bbShowForm)
 bbCancelBtn.addEventListener('click', bbHideForm)
 bbReviewBtn.addEventListener('click', bbReview)
