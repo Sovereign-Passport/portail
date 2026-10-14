@@ -245,6 +245,9 @@ var msgBox         = document.getElementById('msgBox')
 
 var _storedPayload = null
 var _unlockedVault = null
+// Derived AES-GCM vault key — held ONLY in memory to re-decrypt the latest
+// IndexedDB payload on a soft refresh. Never persisted anywhere.
+var _vaultKey      = null
 
 function showMsg(kind, text) {
   msgBox.className = 'msg show ' + kind
@@ -312,6 +315,7 @@ unlockBtn.addEventListener('click', function() {
   unlockVault(password, _storedPayload.salt, _storedPayload.iv, _storedPayload.ciphertext)
     .then(function(result) {
       _unlockedVault = result.vault
+      _vaultKey      = result.vaultKey
       updateBillboardComposer()
       unlockField.style.display = 'none'
       showMsg('info', 'Passport unlocked. Asking your vine…')
@@ -1070,18 +1074,73 @@ function updateBillboardComposer() {
   loadClusterBillboard()   // sets New post per the selected Cluster's endpoint
 }
 
-bbRefreshBtn.addEventListener('click', function() {
-  // Full reload: re-reads the vault, the Clusters, their metadata and the
-  // synced projection. Keep the Billboard service (and the selected Cluster)
-  // in the URL so the active DID/context is restored when still available;
-  // otherwise the boot falls back to the login (unlock) screen.
-  var cluster = bbSelectedCluster()
-  try {
-    location.hash = '#service=billboard' +
-      (cluster ? '&cluster=' + encodeURIComponent(cluster.cluster_id) : '')
-  } catch (e) { /* non-fatal */ }
-  window.location.reload()
-})
+/**
+ * Re-read the LATEST encrypted vault from IndexedDB and re-decrypt it with the
+ * unlock key held ONLY in memory. The vault key and the plaintext are never
+ * persisted. On any failure the current in-memory vault is kept unchanged.
+ * @returns {Promise<void>} resolves once _unlockedVault may have been refreshed
+ */
+function reloadVaultFromStorage() {
+  if (!_vaultKey) return Promise.resolve()
+  return loadStoredVault()
+    .catch(function() { return null })
+    .then(function(payload) {
+      if (!payload || !payload.iv || !payload.ciphertext) return
+      return decryptVault(_vaultKey, payload.iv, payload.ciphertext)
+        .then(function(pt) {
+          // Replace only AFTER a successful decrypt.
+          _unlockedVault = JSON.parse(pt)
+          _storedPayload = payload
+        })
+        .catch(function() { /* keep the current in-memory vault */ })
+    })
+}
+
+/**
+ * Soft refresh — re-reads the latest vault from IndexedDB (re-decrypted with the
+ * in-memory key), rebuilds the Clusters and their metadata, then re-runs
+ * owner sync → cluster/list. Never reloads the page, never locks the Passport,
+ * never persists the password, the private key or the decrypted vault.
+ */
+function bbSoftRefresh() {
+  // No unlocked vault → keep the normal Unlock screen untouched.
+  if (!_unlockedVault) { updateBillboardComposer(); return }
+
+  if (bbRefreshBtn.disabled) return            // one refresh at a time
+  bbRefreshBtn.disabled = true
+
+  // Preserve the selected cluster_id across the rebuild.
+  var selectedId = bbClusterSelect.value || null
+  if (!selectedId) { var cur = bbSelectedCluster(); selectedId = cur ? cur.cluster_id : null }
+
+  reloadVaultFromStorage()
+    .then(function() {
+      // Rebuild Clusters + metadata from the (refreshed) Passport state.
+      _bbClusters = buildClusterOptions(_unlockedVault)
+      bbClusterField.style.display = 'block'
+      bbRenderClusterSelect(selectedId)
+
+      if (_bbClusters.length === 0) {
+        bbNoCluster.style.display = 'block'
+        bbCreateHint.style.display = 'none'
+        bbNewBtn.style.display = 'none'
+        return
+      }
+      bbNoCluster.style.display = 'none'
+      bbCreateHint.style.display = 'none'
+
+      // owner sync → cluster/list. On network error the list shows a Retry and
+      // the Passport stays unlocked.
+      return loadClusterBillboard()
+    })
+    .then(function() {
+      bbRefreshBtn.disabled = false
+    }, function() {
+      bbRefreshBtn.disabled = false
+    })
+}
+
+bbRefreshBtn.addEventListener('click', bbSoftRefresh)
 bbNewBtn.addEventListener('click', bbShowForm)
 bbCancelBtn.addEventListener('click', bbHideForm)
 bbReviewBtn.addEventListener('click', bbReview)
