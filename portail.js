@@ -726,7 +726,23 @@ function _adoptView(view, did, pub) {
   ;(vault.ownClusters || []).forEach(function(c) { ownIds[c.id] = true })
   ;(view.owned_clusters || []).forEach(function(o) {
     if (!o.proof || o.proof.owner_did !== did || !o.proof.signature) return
-    if (o.status === 'revoked') return   // never re-adopt a revoked cluster
+    if (o.status === 'revoked') {
+      // Confirmed deletion → drop it locally (ownClusters + ownership credential).
+      if (vault.ownClusters) {
+        var n = vault.ownClusters.length
+        vault.ownClusters = vault.ownClusters.filter(function(c) { return c.id !== o.cluster_id })
+        if (vault.ownClusters.length !== n) changed = true
+      }
+      if (vault.credentials) {
+        var m = vault.credentials.length
+        vault.credentials = vault.credentials.filter(function(c) {
+          return !(c.cluster_id === o.cluster_id &&
+                   (c.type === 'FounderCredential' || c.type === 'ClusterOwnerCredential'))
+        })
+        if (vault.credentials.length !== m) changed = true
+      }
+      return
+    }
     chain = chain.then(function() {
       return edVerify(pub, o.proof.signed_payload, o.proof.signature).then(function(ok) {
         if (!ok) return
