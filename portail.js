@@ -726,6 +726,7 @@ function _adoptView(view, did, pub) {
   ;(vault.ownClusters || []).forEach(function(c) { ownIds[c.id] = true })
   ;(view.owned_clusters || []).forEach(function(o) {
     if (!o.proof || o.proof.owner_did !== did || !o.proof.signature) return
+    if (o.status === 'revoked') return   // never re-adopt a revoked cluster
     chain = chain.then(function() {
       return edVerify(pub, o.proof.signed_payload, o.proof.signature).then(function(ok) {
         if (!ok) return
@@ -769,6 +770,7 @@ function _adoptView(view, did, pub) {
     var memIds = {}
     vault.memberships.forEach(function(m) { if (m.cluster_id) memIds[m.cluster_id] = true })
     joined.forEach(function(j) {
+      if (j.status === 'revoked') return   // revoked cluster: never adopt
       if (j.cluster_id && !memIds[j.cluster_id]) {
         vault.memberships.push({
           cluster_id: j.cluster_id, node_name: j.name || null, cluster_name: j.name || null,
