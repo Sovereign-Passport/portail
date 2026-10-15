@@ -108,6 +108,36 @@ function edSign(privateKey, dataStr) {
     .then(function(buf) { return toB64url(buf) })
 }
 
+// ── Ed25519 verify — used to check a SELF-ISSUED ownership proof ─────────
+// (the public key is recovered from the vault's own private JWK).
+function importPublicFromPrivate(jwk) {
+  return crypto.subtle.importKey('jwk',
+    { kty: 'OKP', crv: 'Ed25519', x: jwk.x }, { name: 'Ed25519' }, false, ['verify'])
+}
+
+function edVerify(publicKey, dataStr, sigB64) {
+  return crypto.subtle.verify('Ed25519', publicKey, fromB64url(sigB64), enc(dataStr))
+    .catch(function() { return false })
+}
+
+// ── Re-encrypt + persist the SAME vault store the Passport uses ──────────
+function encryptVault(vaultKey, plaintext) {
+  var iv = crypto.getRandomValues(new Uint8Array(12))
+  return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, vaultKey, enc(plaintext))
+    .then(function(buf) { return { iv: toB64url(iv), ciphertext: toB64url(new Uint8Array(buf)) } })
+}
+
+function persistVault(record) {
+  return openDB().then(function(db) {
+    return new Promise(function(res, rej) {
+      var tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(record)
+      tx.oncomplete = function() { res() }
+      tx.onerror    = function(e) { rej(e.target.error) }
+    })
+  })
+}
+
 // ── Build a Verifiable Presentation (identical to credentials.js) ────────
 function encodeJSON(obj) { return toB64url(enc(JSON.stringify(obj))) }
 function uuid() { return crypto.randomUUID() }
@@ -337,6 +367,12 @@ unlockBtn.addEventListener('click', function() {
         showDoors(parsed.level, parsed.services)
       })
     })
+    .then(function() {
+      // Receive owned + joined clusters from the Switchboard (self-issued only),
+      // then refresh the Billboard list so adopted clusters appear.
+      return bbPullAndImport()
+    })
+    .then(function() { updateBillboardComposer() })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
@@ -639,6 +675,118 @@ function bbRenderDisconnected() {
   p.className = 'bb-empty'
   p.textContent = 'Cluster services are not connected yet.'
   bbList.appendChild(p)
+}
+
+/**
+ * Pull the Switchboard's view for THIS DID (owned + joined) and adopt into the
+ * vault ONLY the ownership proofs that are SELF-ISSUED by this DID and whose
+ * signature verifies against the vault's own key. Joined clusters are recorded
+ * as memberships. The Passport stays the source: the Switchboard never imposes
+ * a cluster the DID did not sign for itself.
+ */
+function bbPullAndImport() {
+  if (!_unlockedVault || !_vaultKey) return Promise.resolve({ changed: false })
+  var did  = _unlockedVault.identity.id
+  var host = SPID_BOOTSTRAP_HOST
+  return fetch(host + '/api/switch/nonce')
+    .then(function(r) { if (!r.ok) throw new Error('nonce'); return r.json() })
+    .then(function(nd) {
+      var nonce = nd.nonce, issued_at = nowIso()
+      var base = { type: 'PassportSyncRequest', did: did, nonce: nonce, issued_at: issued_at, proofs: [], pending: [] }
+      return importPrivateKey(_unlockedVault.keys.privateKey)
+        .then(function(pk) { return edSign(pk, JSON.stringify(base)) })
+        .then(function(sig) {
+          var sync = { type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
+                       proofs: base.proofs, pending: base.pending, signature: sig }
+          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+        })
+    })
+    .then(function(resp) {
+      return resp.json().then(function(d) {
+        if (!resp.ok || !d || d.ok !== true) throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+        return d
+      })
+    })
+    .then(function(view) {
+      return importPublicFromPrivate(_unlockedVault.keys.privateKey).then(function(pub) {
+        return _adoptView(view, did, pub)
+      })
+    })
+    .catch(function() { return { changed: false } })
+}
+
+/** Adopt a Switchboard view into the vault (owned proofs + joined memberships). */
+function _adoptView(view, did, pub) {
+  var vault   = _unlockedVault
+  var changed = false
+  var chain   = Promise.resolve()
+
+  // ── owned clusters: self-issued proof only, verified with our own key ──
+  var ownIds = {}
+  ;(vault.ownClusters || []).forEach(function(c) { ownIds[c.id] = true })
+  ;(view.owned_clusters || []).forEach(function(o) {
+    if (!o.proof || o.proof.owner_did !== did || !o.proof.signature) return
+    chain = chain.then(function() {
+      return edVerify(pub, o.proof.signed_payload, o.proof.signature).then(function(ok) {
+        if (!ok) return
+        if (!ownIds[o.cluster_id]) {
+          if (!vault.ownClusters) vault.ownClusters = []
+          vault.ownClusters.push({
+            id: o.cluster_id, name: o.name || o.cluster_id, description: o.description || '',
+            founder_did: did, vine_endpoint: null, vignard_did: null, members: [],
+            status: 'active', created_at: nowIso(),
+          })
+          ownIds[o.cluster_id] = true; changed = true
+        }
+        if (!vault.credentials) vault.credentials = []
+        var has = vault.credentials.some(function(c) {
+          return c.cluster_id === o.cluster_id &&
+            (c.type === 'FounderCredential' || c.type === 'ClusterOwnerCredential')
+        })
+        if (!has) {
+          var claims = null
+          try { claims = JSON.parse(o.proof.signed_payload) } catch (e) { claims = null }
+          var cred
+          if (o.proof.credential_type === 'FounderCredential') {
+            cred = { id: 'founder:' + o.cluster_id, type: 'FounderCredential', cluster_id: o.cluster_id,
+                     cluster_name: o.name, issuer_did: did, subject: did, issued_at: nowIso(),
+                     claims: claims, signature: o.proof.signature }
+          } else {
+            cred = Object.assign({ signature: o.proof.signature }, claims || {
+              type: 'ClusterOwnerCredential', cluster_id: o.cluster_id, owner_did: did,
+            })
+          }
+          vault.credentials.push(cred); changed = true
+        }
+      })
+    })
+  })
+
+  // ── joined clusters: participant view (memberships) ──
+  var joined = view.joined_clusters || []
+  if (joined.length) {
+    if (!vault.memberships) vault.memberships = []
+    var memIds = {}
+    vault.memberships.forEach(function(m) { if (m.cluster_id) memIds[m.cluster_id] = true })
+    joined.forEach(function(j) {
+      if (j.cluster_id && !memIds[j.cluster_id]) {
+        vault.memberships.push({
+          cluster_id: j.cluster_id, node_name: j.name || null, cluster_name: j.name || null,
+          status: j.member_status || 'unknown', vine_endpoint: null,
+        })
+        memIds[j.cluster_id] = true; changed = true
+      }
+    })
+  }
+
+  return chain.then(function() {
+    if (!changed) return { changed: false }
+    var next = Object.assign({}, _storedPayload, { did: did })
+    return encryptVault(_vaultKey, JSON.stringify(vault)).then(function(r) {
+      next.iv = r.iv; next.ciphertext = r.ciphertext
+      return persistVault(next).then(function() { _storedPayload = next; return { changed: true } })
+    })
+  })
 }
 
 /**
@@ -1114,6 +1262,7 @@ function bbSoftRefresh() {
   if (!selectedId) { var cur = bbSelectedCluster(); selectedId = cur ? cur.cluster_id : null }
 
   reloadVaultFromStorage()
+    .then(function() { return bbPullAndImport() })
     .then(function() {
       // Rebuild Clusters + metadata from the (refreshed) Passport state.
       _bbClusters = buildClusterOptions(_unlockedVault)
