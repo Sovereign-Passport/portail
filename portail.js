@@ -916,7 +916,11 @@ function loadClusterBillboard() {
   bbList.appendChild(loading)
 
   // Owned Cluster: present its exact owner proof to the Switchboard FIRST.
-  var prep = isOwned ? bbOwnerSync(cluster) : Promise.resolve()
+  // Best-effort: reading announcements must never be blocked by a failed sync
+  // (e.g. an owned Cluster with no self-issued proof in this vault).
+  var prep = (isOwned && cluster.ownerProof)
+    ? bbOwnerSync(cluster).catch(function() { /* non-fatal */ })
+    : Promise.resolve()
 
   return prep.then(function() {
     var did = _unlockedVault.identity.id
