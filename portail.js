@@ -922,6 +922,9 @@ function loadClusterBillboard() {
     return Promise.resolve()
   }
 
+  // Diagnostics — surfaced in the error message so a phone failure can be read.
+  var diag = { host: host, status: null, sync: null }
+
   bbNewBtn.style.display = 'inline-block'
   bbHideStatus()
   bbList.innerHTML = ''
@@ -932,10 +935,14 @@ function loadClusterBillboard() {
 
   // Owned Cluster: present its exact owner proof to the Switchboard FIRST.
   // Best-effort: reading announcements must never be blocked by a failed sync
-  // (e.g. an owned Cluster with no self-issued proof in this vault).
-  var prep = (isOwned && cluster.ownerProof)
-    ? bbOwnerSync(cluster).catch(function() { /* non-fatal */ })
-    : Promise.resolve()
+  // — but its error is kept for the diagnostics below.
+  var prep
+  if (isOwned && cluster.ownerProof) {
+    prep = bbOwnerSync(cluster).catch(function(e) { diag.sync = (e && e.message) || String(e) })
+  } else {
+    if (isOwned) diag.sync = 'no owner proof in this vault'
+    prep = Promise.resolve()
+  }
 
   return prep.then(function() {
     var did = _unlockedVault.identity.id
@@ -958,6 +965,7 @@ function loadClusterBillboard() {
     })
   })
   .then(function(r) {
+    diag.status = r.status
     if (!r.ok || !r.data || !Array.isArray(r.data.posts)) {
       var msg = (r.data && (r.data.message || r.data.error)) || ('HTTP ' + r.status)
       throw new Error(msg)
@@ -966,9 +974,17 @@ function loadClusterBillboard() {
   })
   .catch(function(e) {
     bbList.innerHTML = ''
-    var err = document.createElement('p')
+    var err = document.createElement('pre')
     err.className = 'bb-empty'
-    err.textContent = 'Could not load announcements: ' + e.message
+    err.style.whiteSpace = 'pre-wrap'
+    err.style.wordBreak = 'break-word'
+    var lines = 'Could not load announcements: ' + ((e && e.message) || e)
+    lines += '\n→ ' + diag.host
+    lines += (diag.status == null)
+      ? '   — no response (network / DNS / CORS)'
+      : '   (HTTP ' + diag.status + ')'
+    if (diag.sync) lines += '\n→ owner sync: ' + diag.sync
+    err.textContent = lines
     bbList.appendChild(err)
     var retry = document.createElement('button')
     retry.type = 'button'
