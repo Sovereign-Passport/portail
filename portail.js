@@ -815,12 +815,27 @@ function _adoptView(view, did, pub) {
 
   // ── joined clusters: participant view (memberships) ──
   var joined = view.joined_clusters || []
+  // A Cluster the DID OWNS is never recorded as "joined": owning already
+  // implies membership, and it must not be listed twice in the Passport.
+  var viewOwned = {}
+  ;(view.owned_clusters || []).forEach(function(o) { viewOwned[o.cluster_id] = true })
+
+  // Prune stale membership entries that are in fact owned (or revoked upstream).
+  if (vault.memberships && vault.memberships.length) {
+    var bLen = vault.memberships.length
+    vault.memberships = vault.memberships.filter(function(m) {
+      return !(m.cluster_id && (ownIds[m.cluster_id] || viewOwned[m.cluster_id]))
+    })
+    if (vault.memberships.length !== bLen) changed = true
+  }
+
   if (joined.length) {
     if (!vault.memberships) vault.memberships = []
     var memIds = {}
     vault.memberships.forEach(function(m) { if (m.cluster_id) memIds[m.cluster_id] = true })
     joined.forEach(function(j) {
       if (j.status === 'revoked') return   // revoked cluster: never adopt
+      if (ownIds[j.cluster_id] || viewOwned[j.cluster_id]) return   // owned → never "joined"
       if (j.cluster_id && !memIds[j.cluster_id]) {
         vault.memberships.push({
           cluster_id: j.cluster_id, node_name: j.name || null, cluster_name: j.name || null,
