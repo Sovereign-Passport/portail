@@ -678,6 +678,36 @@ function bbRenderDisconnected() {
 }
 
 /**
+ * Push the COMPLETE owned set (self-issued proofs) so the Switchboard can
+ * mirror its projection: a Cluster ABSENT from the set is removed from it
+ * (revoked if not attached to a Vine, held pending if it is). Best-effort —
+ * a reconciliation failure never blocks the pull.
+ * @param {string} host
+ * @param {string} did
+ */
+function bbOwnerReconcile(host, did) {
+  if (!_unlockedVault || !_vaultKey) return Promise.resolve()
+  var proofs = buildClusterOptions(_unlockedVault)
+    .filter(function(c) { return c.owned && c.ownerProof })
+    .map(function(c) { return c.ownerProof })
+
+  return fetch(host + '/api/switch/nonce')
+    .then(function(r) { if (!r.ok) throw new Error('nonce'); return r.json() })
+    .then(function(nd) {
+      var nonce = nd.nonce, issued_at = nowIso()
+      var base = { type: 'PassportSyncRequest', did: did, nonce: nonce, issued_at: issued_at,
+                   proofs: proofs, pending: [], complete: true }
+      return importPrivateKey(_unlockedVault.keys.privateKey)
+        .then(function(pk) { return edSign(pk, JSON.stringify(base)) })
+        .then(function(sig) {
+          var sync = { type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
+                       proofs: base.proofs, pending: base.pending, complete: base.complete, signature: sig }
+          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+        })
+    })
+}
+
+/**
  * Pull the Switchboard's view for THIS DID (owned + joined) and adopt into the
  * vault ONLY the ownership proofs that are SELF-ISSUED by this DID and whose
  * signature verifies against the vault's own key. Joined clusters are recorded
@@ -688,7 +718,11 @@ function bbPullAndImport() {
   if (!_unlockedVault || !_vaultKey) return Promise.resolve({ changed: false })
   var did  = _unlockedVault.identity.id
   var host = SPID_BOOTSTRAP_HOST
-  return fetch(host + '/api/switch/nonce')
+  // Best-effort FIRST: push the COMPLETE owned set so the Switchboard can
+  // reconcile its projection (a Cluster absent from it is removed). Never
+  // blocks the pull — the pull still works if this fails.
+  return bbOwnerReconcile(host, did).catch(function() {})
+    .then(function() { return fetch(host + '/api/switch/nonce') })
     .then(function(r) { if (!r.ok) throw new Error('nonce'); return r.json() })
     .then(function(nd) {
       var nonce = nd.nonce, issued_at = nowIso()
