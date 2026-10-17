@@ -848,6 +848,12 @@ function _adoptView(view, did, pub) {
 
   return chain.then(function() {
     if (!changed) return { changed: false }
+    // SAFETY: the Passport and the Portal SHARE this vault record. Never write
+    // back a record without the PBKDF2 salt/key — the Passport would then be
+    // unable to derive the key and would report "Wrong password" forever.
+    if (!_storedPayload || !_storedPayload.salt || !_storedPayload.key) {
+      return { changed: false, error: 'NO_BASE_PAYLOAD' }
+    }
     var next = Object.assign({}, _storedPayload, { did: did })
     return encryptVault(_vaultKey, JSON.stringify(vault)).then(function(r) {
       next.iv = r.iv; next.ciphertext = r.ciphertext
