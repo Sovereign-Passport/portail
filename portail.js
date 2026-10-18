@@ -1542,6 +1542,8 @@ var assistPlanBox = document.getElementById('assistPlanBox')
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
 
+console.log('Orbit Assist UI v3')
+
 function assistInit() {
   assistDivider.style.display = 'flex'
   assistField.style.display   = 'block'
