@@ -289,8 +289,9 @@ function clearMsg() {
 }
 
 function showDoors(level, services) {
-  doorsDivider.style.display = 'flex'
-  doorsField.style.display   = 'block'
+  // "your doors" is intentionally hidden on the Assist page (kept in the DOM).
+  doorsDivider.style.display = 'none'
+  doorsField.style.display   = 'none'
   doorsList.innerHTML        = ''
 
   if (!services || services.length === 0) {
