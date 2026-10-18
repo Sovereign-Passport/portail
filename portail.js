@@ -1534,6 +1534,7 @@ var assistField   = document.getElementById('assistField')
 var assistInput   = document.getElementById('assistInput')
 var assistSendBtn = document.getElementById('assistSendBtn')
 var assistRecBtn  = document.getElementById('assistRecBtn')
+var assistRecLabel = document.getElementById('assistRecLabel')
 var assistStatus  = document.getElementById('assistStatus')
 var assistLog     = document.getElementById('assistLog')
 var assistPlanBox = document.getElementById('assistPlanBox')
@@ -1722,7 +1723,7 @@ function assistRecordToggle() {
     _assistRecorder.addEventListener('stop', function () {
       stream.getTracks().forEach(function (t) { t.stop() })
       _assistRecorder = null
-      assistRecBtn.textContent = '🎙 Enregistrer'
+      assistRecLabel.textContent = 'Enregistrer'
       var blob = new Blob(_assistChunks, { type: 'audio/webm' })
       if (!blob.size) return
       assistSetStatus('Transcription…')
@@ -1738,14 +1739,16 @@ function assistRecordToggle() {
               return
             }
             assistInput.value = d.text
-            assistSend()
+            assistInput.focus()
+            assistLine('Vous (voix) : ' + d.text)
+            assistSetStatus('Transcription prête — vérifie puis « Envoyer ».')
           })})
           .catch(function (e) { assistSetStatus(''); assistLine('Erreur transcription : ' + e.message) })
       }
       reader.readAsDataURL(blob)
     })
     _assistRecorder.start()
-    assistRecBtn.textContent = '⏹ Stop'
+    assistRecLabel.textContent = 'Arrêter'
     assistSetStatus('Enregistrement… (cliquez Stop)')
   }).catch(function (e) {
     assistLine('Micro indisponible : ' + e.message)

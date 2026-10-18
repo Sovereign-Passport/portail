@@ -64,7 +64,13 @@
           <textarea id="assistInput" class="bb-textarea" rows="3"
                     placeholder="Écrivez votre demande (ou enregistrez un court message)…"></textarea>
           <div class="bb-actions" style="margin-top:8px;">
-            <button class="btn btn-ghost" id="assistRecBtn" type="button">🎙 Enregistrer</button>
+            <button class="btn btn-ghost" id="assistRecBtn" type="button">
+              <svg viewBox="0 0 18 12" width="16" height="11" aria-hidden="true" style="vertical-align:middle">
+                <path d="M2 6v0M5 4v4M8 1v10M11 4v4M14 2v8M16 5v2"
+                      stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+              </svg>
+              <span id="assistRecLabel">Enregistrer</span>
+            </button>
             <button class="btn btn-gold" id="assistSendBtn" type="button">Envoyer</button>
           </div>
           <div id="assistStatus" class="bb-status" style="display:none;"></div>
