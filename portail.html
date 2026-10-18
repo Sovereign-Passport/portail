@@ -58,6 +58,20 @@
           <div id="doorsList" class="doors-list"></div>
         </div>
 
+        <!-- Assist conversation — planner + signed execution (after unlock) -->
+        <div class="divider" id="assistDivider" style="display:none">conversation</div>
+        <div class="field" id="assistField" style="display:none">
+          <textarea id="assistInput" class="bb-textarea" rows="3"
+                    placeholder="Écrivez votre demande (ou enregistrez un court message)…"></textarea>
+          <div class="bb-actions" style="margin-top:8px;">
+            <button class="btn btn-ghost" id="assistRecBtn" type="button">🎙 Enregistrer</button>
+            <button class="btn btn-gold" id="assistSendBtn" type="button">Envoyer</button>
+          </div>
+          <div id="assistStatus" class="bb-status" style="display:none;"></div>
+          <div id="assistLog" class="bb-list"></div>
+          <div id="assistPlanBox" class="bb-confirm" style="display:none;"></div>
+        </div>
+
         <div id="msgBox" class="msg"></div>
 
       </section>

@@ -372,7 +372,7 @@ unlockBtn.addEventListener('click', function() {
       // then refresh the Billboard list so adopted clusters appear.
       return bbPullAndImport()
     })
-    .then(function() { updateBillboardComposer() })
+    .then(function() { updateBillboardComposer(); assistInit() })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
@@ -1519,3 +1519,232 @@ try {
 
 // Fragment absent or invalid → Assist.
 activateService(serviceFromHash())
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 6 — ASSIST (chat + voice)
+//
+// Text -> Switchboard 'assist/plan' (planner, no execution) -> clarification
+// or confirmation -> on confirm, the Passport signs EACH action through the
+// Switchboard (calendar/messages/finance/checklist). Nothing runs server-side.
+// ═════════════════════════════════════════════════════════════════════════
+
+var assistDivider = document.getElementById('assistDivider')
+var assistField   = document.getElementById('assistField')
+var assistInput   = document.getElementById('assistInput')
+var assistSendBtn = document.getElementById('assistSendBtn')
+var assistRecBtn  = document.getElementById('assistRecBtn')
+var assistStatus  = document.getElementById('assistStatus')
+var assistLog     = document.getElementById('assistLog')
+var assistPlanBox = document.getElementById('assistPlanBox')
+
+var _assistDraft   = ''    // original request, kept across a clarification
+var _assistPending = null  // plan awaiting confirmation
+
+function assistInit() {
+  assistDivider.style.display = 'flex'
+  assistField.style.display   = 'block'
+}
+
+function assistLine(text) {
+  var p = document.createElement('div')
+  p.className = 'bb-note'
+  p.textContent = text
+  assistLog.appendChild(p)
+}
+function assistSetStatus(text) {
+  if (!text) { assistStatus.style.display = 'none'; assistStatus.textContent = ''; return }
+  assistStatus.textContent = text
+  assistStatus.style.display = 'block'
+}
+
+function _assistCredential() {
+  var creds = (_unlockedVault && _unlockedVault.credentials) || []
+  return creds.filter(function (c) {
+    return c.type === 'MembershipCredential' && !c.revoked
+  })[0] || null
+}
+function _assistCluster() {
+  return (_bbClusters && _bbClusters.length) ? _bbClusters[0] : null
+}
+function _assistHost() {
+  var cl = _assistCluster()
+  if (cl && cl.endpoint) return cl.endpoint
+  return switchboardHostFor(_assistCredential())
+}
+function _assistScope() {
+  var cl = _assistCluster()
+  return cl ? { type: 'cluster', id: cl.cluster_id } : null
+}
+
+/** Sign one Switchboard request with the unlocked Passport (presentation). */
+function _assistSignedBody(service, action, data, scope) {
+  var host = _assistHost()
+  var cred = _assistCredential()
+  var sc   = scope || _assistScope()
+  return fetch(host + '/api/switch/nonce')
+    .then(function (r) { if (!r.ok) throw new Error('nonce'); return r.json() })
+    .then(function (n) {
+      var body = { service: service, action: action, data: data || {} }
+      if (sc) { body.scope_type = sc.type; body.scope_id = sc.id }
+      if (!cred) return body
+      return importPrivateKey(_unlockedVault.keys.privateKey).then(function (pk) {
+        return buildPresentation({
+          credential: cred, revealKeys: [],
+          holderDid: _unlockedVault.identity.id, holderPrivateKey: pk,
+          verifierDid: cred.issuer_did || DEFAULT_VINE_DID, nonce: n.nonce,
+        }).then(function (pres) {
+          body.did = _unlockedVault.identity.id
+          body.presentation = pres
+          body.nonce = n.nonce
+          return body
+        })
+      })
+    })
+    .then(function (body) { return bbSwitch(host, body) })
+}
+
+function assistRenderPlan(plan) {
+  assistPlanBox.innerHTML = ''
+  assistPlanBox.style.display = 'block'
+
+  var head = document.createElement('p'); head.className = 'cred-type'
+  head.textContent = 'Plan proposé (' + (plan.status || '?') + ')'
+  assistPlanBox.appendChild(head)
+
+  if (plan.summary) assistLine(plan.summary)
+  if (plan.question) {
+    var q = document.createElement('p'); q.className = 'bb-note'
+    q.textContent = '❓ ' + plan.question
+    assistPlanBox.appendChild(q)
+    return
+  }
+
+  var actions = plan.actions || []
+  actions.forEach(function (a) {
+    var row = document.createElement('div'); row.className = 'bb-confirm-row'
+    row.innerHTML = '<span>' + (a.service || '?') + '</span><strong>' + (a.action || '') + '</strong>'
+    assistPlanBox.appendChild(row)
+  })
+
+  if (plan.status === 'needs_confirmation' && actions.length) {
+    _assistPending = plan
+    var ok = document.createElement('button')
+    ok.className = 'btn btn-gold'; ok.type = 'button'
+    ok.textContent = 'Confirmer et exécuter'
+    ok.style.marginTop = '12px'
+    ok.addEventListener('click', function () { assistConfirm(plan) })
+    assistPlanBox.appendChild(ok)
+  }
+}
+
+function assistConfirm(plan) {
+  var actions = plan.actions || []
+  if (!actions.length) return
+  assistSetStatus('Exécution signée…')
+  assistPlanBox.style.display = 'none'
+  var sc = _assistScope()
+  var chain = Promise.resolve()
+  var results = []
+  actions.forEach(function (a) {
+    chain = chain.then(function () {
+      return _assistSignedBody(a.service, a.action, a.data || {}, sc)
+        .then(function (resp) {
+          results.push(a.service + '/' + a.action + ' → ' + (resp.ok ? 'OK' : 'REFUSÉ'))
+        })
+        .catch(function (e) {
+          results.push(a.service + '/' + a.action + ' → erreur (' + e.message + ')')
+        })
+    })
+  })
+  chain.then(function () {
+    assistSetStatus('')
+    assistLine('Résultat : ' + results.join(' ; '))
+  })
+}
+
+function assistSubmit(text) {
+  if (!text) return
+  assistSetStatus('Planification…')
+  _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope() })
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok) {
+        assistSetStatus('')
+        assistLine('Erreur : ' + ((d && (d.detail || d.error)) || resp.status))
+        return
+      }
+      if (d && d.status === 'needs_clarification' && d.question) {
+        assistSetStatus('')
+        assistLine('Orbit : ' + d.question)
+        _assistDraft = text  // keep context; the next message is appended
+        return
+      }
+      _assistDraft = ''
+      assistSetStatus('')
+      assistRenderPlan(d || {})
+    })})
+    .catch(function (e) { assistSetStatus(''); assistLine('Erreur : ' + e.message) })
+}
+
+function assistSend() {
+  var text = (assistInput.value || '').trim()
+  if (!text) return
+  assistInput.value = ''
+  assistLine('Vous : ' + text)
+  assistSubmit(_assistDraft ? (_assistDraft + ' ' + text) : text)
+}
+
+assistSendBtn.addEventListener('click', assistSend)
+assistInput.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); assistSend() }
+})
+
+// ── Voice: record a short message, transcribe via the Switchboard ─────────
+var _assistRecorder = null
+var _assistChunks   = []
+
+function assistRecordToggle() {
+  if (_assistRecorder) { _assistRecorder.stop(); return }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    assistLine('Enregistrement non supporté par ce navigateur.')
+    return
+  }
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    _assistChunks = []
+    _assistRecorder = new MediaRecorder(stream)
+    _assistRecorder.addEventListener('dataavailable', function (e) {
+      if (e.data && e.data.size) _assistChunks.push(e.data)
+    })
+    _assistRecorder.addEventListener('stop', function () {
+      stream.getTracks().forEach(function (t) { t.stop() })
+      _assistRecorder = null
+      assistRecBtn.textContent = '🎙 Enregistrer'
+      var blob = new Blob(_assistChunks, { type: 'audio/webm' })
+      if (!blob.size) return
+      assistSetStatus('Transcription…')
+      var reader = new FileReader()
+      reader.onload = function () {
+        var b64 = String(reader.result).split(',')[1] || ''
+        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm' })
+          .then(function (resp) { return resp.text().then(function (t) {
+            var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+            assistSetStatus('')
+            if (!resp.ok || !d || !d.text) {
+              assistLine('Transcription indisponible : ' + ((d && (d.detail || d.error)) || resp.status))
+              return
+            }
+            assistInput.value = d.text
+            assistSend()
+          })})
+          .catch(function (e) { assistSetStatus(''); assistLine('Erreur transcription : ' + e.message) })
+      }
+      reader.readAsDataURL(blob)
+    })
+    _assistRecorder.start()
+    assistRecBtn.textContent = '⏹ Stop'
+    assistSetStatus('Enregistrement… (cliquez Stop)')
+  }).catch(function (e) {
+    assistLine('Micro indisponible : ' + e.message)
+  })
+}
+assistRecBtn.addEventListener('click', assistRecordToggle)
