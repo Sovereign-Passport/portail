@@ -1649,9 +1649,12 @@ function assistConfirm(plan) {
   actions.forEach(function (a) {
     chain = chain.then(function () {
       return _assistSignedBody(a.service, a.action, a.data || {}, sc)
-        .then(function (resp) {
-          results.push(a.service + '/' + a.action + ' → ' + (resp.ok ? 'OK' : 'REFUSÉ'))
-        })
+        .then(function (resp) { return resp.text().then(function (t) {
+          var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+          var label = resp.ok ? 'OK'
+            : ('REFUSÉ (' + ((d && (d.error || d.detail || d.reason)) || resp.status) + ')')
+          results.push(a.service + '/' + a.action + ' → ' + label)
+        })})
         .catch(function (e) {
           results.push(a.service + '/' + a.action + ' → erreur (' + e.message + ')')
         })
