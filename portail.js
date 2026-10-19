@@ -1738,8 +1738,9 @@ function assistRecordToggle() {
             assistSetStatus('')
             if (!resp.ok || !d || !d.text) {
               var why = (d && (d.stt_error || d.detail || d.error)) || ('HTTP ' + resp.status)
-              var dur = (d && d.seconds) ? (', ' + d.seconds + ' s audio capté') : ''
-              assistLine('Transcription vide (' + blob.size + ' o' + dur + ') : ' + why)
+              var dur = (d && d.seconds) ? (', ' + d.seconds + ' s audio') : ''
+              var lvl = (d && d.peak != null) ? (', niveau ' + d.peak) : ''
+              assistLine('Transcription vide (' + blob.size + ' o' + dur + lvl + ') : ' + why)
               return
             }
             assistInput.value = d.text
