@@ -1737,7 +1737,9 @@ function assistRecordToggle() {
             var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
             assistSetStatus('')
             if (!resp.ok || !d || !d.text) {
-              assistLine('Transcription indisponible : ' + ((d && (d.detail || d.error)) || resp.status))
+              var why = (d && (d.stt_error || d.detail || d.error)) || ('HTTP ' + resp.status)
+              var dur = (d && d.seconds) ? (', ' + d.seconds + ' s audio capté') : ''
+              assistLine('Transcription vide (' + blob.size + ' o' + dur + ') : ' + why)
               return
             }
             assistInput.value = d.text
