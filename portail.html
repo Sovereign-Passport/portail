@@ -73,6 +73,13 @@
             </button>
             <button class="btn btn-gold" id="assistSendBtn" type="button">Envoyer</button>
           </div>
+          <div class="bb-actions" id="assistMicRow" style="margin-top:8px; display:none;">
+            <select id="assistMicSel" style="flex:1;min-width:0;padding:8px;border-radius:8px;background:transparent;color:inherit;border:1px solid rgba(255,255,255,.18)"></select>
+            <button class="btn btn-ghost" id="assistMicRefresh" type="button">Micros</button>
+          </div>
+          <div id="assistMeter" style="display:none;height:6px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:8px;overflow:hidden">
+            <div id="assistMeterFill" style="height:100%;width:0;background:#d4af37;transition:width .08s"></div>
+          </div>
           <div id="assistStatus" class="bb-status" style="display:none;"></div>
           <div id="assistLog" class="bb-list"></div>
           <div id="assistPlanBox" class="bb-confirm" style="display:none;"></div>
@@ -155,6 +162,6 @@
     </div>
   </div>
 
-<script src="portail.js?v=5"></script>
+<script src="portail.js?v=6"></script>
 </body>
 </html>

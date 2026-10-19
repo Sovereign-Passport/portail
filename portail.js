@@ -1542,7 +1542,7 @@ var assistPlanBox = document.getElementById('assistPlanBox')
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
 
-console.log('Orbit Assist UI v5')
+console.log('Orbit Assist UI v6')
 
 function assistInit() {
   assistDivider.style.display = 'flex'
@@ -1706,9 +1706,51 @@ assistInput.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); assistSend() }
 })
 
-// ── Voice: record a short message, transcribe via the Switchboard ─────────
+// ── Voice: choose a mic, record, transcribe via the Switchboard ──────────
 var _assistRecorder = null
 var _assistChunks   = []
+var _assistMicId    = (window.localStorage && localStorage.getItem('assistMicId')) || ''
+var _assistMeterRAF = null
+var _assistMaxPeak  = 0
+
+function _assistMicConstraints() {
+  var c = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  if (_assistMicId) c.deviceId = { exact: _assistMicId }
+  return { audio: c }
+}
+
+function assistLoadMics() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return
+  navigator.mediaDevices.enumerateDevices().then(function (devs) {
+    var mics = devs.filter(function (d) { return d.kind === 'audioinput' })
+    var sel = document.getElementById('assistMicSel')
+    var row = document.getElementById('assistMicRow')
+    if (!sel || !row) return
+    if (mics.length && mics.every(function (m) { return !m.label })) {
+      // Labels require a one-time permission grant.
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+        s.getTracks().forEach(function (t) { t.stop() })
+        assistLoadMics()
+      }).catch(function () {})
+      return
+    }
+    row.style.display = mics.length > 1 ? 'flex' : 'none'
+    sel.innerHTML = ''
+    mics.forEach(function (m, i) {
+      var o = document.createElement('option')
+      o.value = m.deviceId
+      o.textContent = m.label || ('Micro ' + (i + 1))
+      if (m.deviceId === _assistMicId) o.selected = true
+      sel.appendChild(o)
+    })
+    if (!_assistMicId && mics.length) { _assistMicId = mics[0].deviceId; sel.value = _assistMicId }
+  }).catch(function () {})
+}
+
+function _assistStopMeter() {
+  if (_assistMeterRAF) { cancelAnimationFrame(_assistMeterRAF); _assistMeterRAF = null }
+  var m = document.getElementById('assistMeter'); if (m) m.style.display = 'none'
+}
 
 function assistRecordToggle() {
   if (_assistRecorder) { _assistRecorder.stop(); return }
@@ -1716,18 +1758,46 @@ function assistRecordToggle() {
     assistLine('Enregistrement non supporté par ce navigateur.')
     return
   }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+  navigator.mediaDevices.getUserMedia(_assistMicConstraints()).then(function (stream) {
     _assistChunks = []
+    _assistMaxPeak = 0
+    var actx = null
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext
+      actx = new AC()
+      var an = actx.createAnalyser(); an.fftSize = 1024
+      actx.createMediaStreamSource(stream).connect(an)
+      var buf = new Uint8Array(an.fftSize)
+      var wrap = document.getElementById('assistMeter')
+      var fill = document.getElementById('assistMeterFill')
+      if (wrap) wrap.style.display = 'block'
+      var tick = function () {
+        an.getByteTimeDomainData(buf)
+        var peak = 0
+        for (var i = 0; i < buf.length; i++) { var v = Math.abs(buf[i] - 128); if (v > peak) peak = v }
+        if (peak > _assistMaxPeak) _assistMaxPeak = peak
+        if (fill) fill.style.width = Math.min(100, peak * 100 / 128) + '%'
+        _assistMeterRAF = requestAnimationFrame(tick)
+      }
+      tick()
+    } catch (e) { actx = null }
+
     _assistRecorder = new MediaRecorder(stream)
     _assistRecorder.addEventListener('dataavailable', function (e) {
       if (e.data && e.data.size) _assistChunks.push(e.data)
     })
     _assistRecorder.addEventListener('stop', function () {
       stream.getTracks().forEach(function (t) { t.stop() })
+      if (actx) { try { actx.close() } catch (e) {} }
+      _assistStopMeter()
       _assistRecorder = null
       assistRecLabel.textContent = 'Enregistrer'
       var blob = new Blob(_assistChunks, { type: 'audio/webm' })
-      if (!blob.size) return
+      if (!blob.size) { assistLine('Rien enregistré.'); return }
+      if (_assistMaxPeak < 3) {
+        assistLine('Micro silencieux : aucun son capté. Choisis une autre entrée dans la liste « Micros » et vérifie qu’elle n’est pas muette.')
+        return
+      }
       assistSetStatus('Transcription…')
       var reader = new FileReader()
       reader.onload = function () {
@@ -1748,15 +1818,27 @@ function assistRecordToggle() {
             assistLine('Vous (voix) : ' + d.text)
             assistSetStatus('Transcription prête — vérifie puis « Envoyer ».')
           })})
-          .catch(function (e) { assistSetStatus(''); assistLine('Erreur transcription : ' + e.message) })
+          .catch(function (e) { assistSetStatus(''); assistLine('Erreur transcription : ' + (e && e.message ? e.message : e)) })
       }
       reader.readAsDataURL(blob)
     })
     _assistRecorder.start()
     assistRecLabel.textContent = 'Arrêter'
     assistSetStatus('Enregistrement… (cliquez Stop)')
+    assistLoadMics()
   }).catch(function (e) {
-    assistLine('Micro indisponible : ' + e.message)
+    assistLine('Micro indisponible : ' + (e && e.message ? e.message : e))
   })
 }
 assistRecBtn.addEventListener('click', assistRecordToggle)
+
+;(function () {
+  var sel = document.getElementById('assistMicSel')
+  if (sel) sel.addEventListener('change', function () {
+    _assistMicId = sel.value
+    try { localStorage.setItem('assistMicId', _assistMicId) } catch (e) {}
+    assistLine('Micro sélectionné.')
+  })
+  var rf = document.getElementById('assistMicRefresh')
+  if (rf) rf.addEventListener('click', function () { assistLoadMics() })
+})()
