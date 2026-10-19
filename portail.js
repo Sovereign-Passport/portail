@@ -2152,3 +2152,7 @@ function calendarTodayGo() {
 if (calPrevBtn)  calPrevBtn.addEventListener('click', function () { calendarShiftMonth(-1) })
 if (calNextBtn)  calNextBtn.addEventListener('click', function () { calendarShiftMonth(1) })
 if (calTodayBtn) calTodayBtn.addEventListener('click', calendarTodayGo)
+
+// The initial activateService() ran before these DOM refs existed — if the page
+// opened straight on the Calendar tab, render it now.
+if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
