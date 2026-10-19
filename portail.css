@@ -90,26 +90,31 @@ html, body {
 /* ── Service tabs ─────────────────────────────────────────────────── */
 .tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
   margin: 18px 0 0;
   border-bottom: 1px solid rgba(255,255,255,0.1);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  padding: 9px 10px 8px;
+  padding: 8px 5px 7px;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   font-family: 'Georgia', serif;
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
@@ -122,7 +127,6 @@ html, body {
   border-bottom-color: var(--gold);
   background: rgba(201, 169, 97, 0.08);
 }
-.tab[aria-selected="true"]::before { content: '▸ '; font-size: 10px; }
 
 .tab-panel { padding-top: 18px; outline: none; }
 .tab-panel:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
@@ -305,7 +309,7 @@ select.svc-select:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 @media (max-width: 480px) {
   .panel { max-width: 100%; margin-bottom: 24px; }
-  .tab { font-size: 11px; letter-spacing: 0.08em; padding: 9px 7px 8px; }
+  .tab { font-size: 9.5px; letter-spacing: 0.02em; padding: 8px 4px 7px; }
 }
 
 /* ── Embedded mode (?embed=1) — transparent, fits the MduSL host UI ── */
@@ -375,3 +379,72 @@ html.embed .panel { margin-bottom: 0; }
 .bb-confirm-row > div { color: var(--text); word-break: break-word; white-space: pre-wrap; }
 .bb-actions { display: flex; gap: 8px; }
 .bb-actions .btn { width: auto; flex: 1; }
+
+/* ── Agenda — day strip + continuous, day-grouped list ────────────────
+   Generic (reused by the future Messages view). Colour = the scope
+   (personal DID / cluster) an entry belongs to. */
+.agenda { margin-top: 4px; }
+.agenda-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.agenda-month {
+  flex: 1; text-align: center; font-size: 12px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--gold-bright);
+}
+.agenda-nav {
+  flex: 0 0 34px; width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px; color: var(--text); cursor: pointer; font-size: 15px; line-height: 1;
+}
+.agenda-nav:hover { border-color: var(--gold); color: var(--gold-bright); }
+.agenda-today {
+  flex: 0 0 auto; width: auto; margin: 0; padding: 9px 12px;
+  font-size: 10px; letter-spacing: 0.08em;
+}
+.agenda-strip {
+  display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+  padding: 4px 2px 10px; scrollbar-width: none;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.agenda-strip::-webkit-scrollbar { display: none; }
+.agenda-day {
+  flex: 0 0 auto; width: 46px; padding: 8px 0 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: transparent; border: 1px solid transparent; border-radius: 10px;
+  color: var(--text-dim); cursor: pointer; font-family: 'Georgia', serif;
+}
+.agenda-day:hover { border-color: rgba(255,255,255,0.14); }
+.agenda-day.is-today { border-color: rgba(201,169,97,0.4); }
+.agenda-day.is-sel { background: rgba(201,169,97,0.10); border-color: var(--gold); }
+.agenda-dow { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+.agenda-num { font-size: 15px; color: var(--text); }
+.agenda-day.is-today .agenda-num,
+.agenda-day.is-sel .agenda-num { color: var(--gold-bright); font-weight: 700; }
+.agenda-dots { display: flex; gap: 3px; height: 6px; align-items: center; }
+.agenda-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); }
+.agenda-list { margin-top: 10px; display: flex; flex-direction: column; }
+.agenda-day-head {
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-dim); margin: 14px 0 2px; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.agenda-day-head:first-child { margin-top: 0; }
+.agenda-day-head.is-today { color: var(--gold); }
+.agenda-item {
+  display: flex; gap: 10px; margin-top: 6px; overflow: hidden;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+}
+.agenda-bar { flex: 0 0 4px; background: var(--text-dim); }
+.agenda-body { flex: 1; min-width: 0; padding: 8px 12px 8px 0; }
+.agenda-line { display: flex; align-items: baseline; gap: 8px; }
+.agenda-time { font-size: 11px; color: var(--text-dim); flex: 0 0 auto; }
+.agenda-title { font-size: 14px; color: var(--text); word-break: break-word; }
+.agenda-scope {
+  display: block; margin-top: 3px; font-size: 10px; font-style: italic;
+  color: var(--text-dim); word-break: break-word;
+}
+.agenda-empty {
+  padding: 24px 12px; text-align: center; font-style: italic;
+  font-size: 12.5px; color: var(--text-dim);
+  border: 1px dashed rgba(255,255,255,0.15); border-radius: 10px;
+}

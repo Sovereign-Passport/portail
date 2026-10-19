@@ -373,7 +373,7 @@ unlockBtn.addEventListener('click', function() {
       // then refresh the Billboard list so adopted clusters appear.
       return bbPullAndImport()
     })
-    .then(function() { updateBillboardComposer(); assistInit() })
+    .then(function() { updateBillboardComposer(); assistInit(); calendarReset() })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
@@ -569,6 +569,11 @@ function bbRenderClusterSelect(preferredId) {
     opt.textContent = c.label
     bbClusterSelect.appendChild(opt)
   })
+  // Non-level (public) announcements — always offered in the same select.
+  var pub = document.createElement('option')
+  pub.value = '__public__'
+  pub.textContent = '— Public (sans cluster) —'
+  bbClusterSelect.appendChild(pub)
   // URL preference is UI-only: select it ONLY if it is a real UUID present here.
   var want = (typeof preferredId === 'string' && UUID_RE.test(preferredId)) ? preferredId : null
   var hasWant = false
@@ -576,12 +581,14 @@ function bbRenderClusterSelect(preferredId) {
     if (_bbClusters[w].cluster_id === want) { hasWant = true; break }
   }
   if (hasWant) { bbClusterSelect.value = want; return }
+  if (keep === '__public__') { bbClusterSelect.value = '__public__'; return }
   var found = false
   for (var i = 0; i < _bbClusters.length; i++) {
     if (_bbClusters[i].cluster_id === keep) { found = true; break }
   }
   if (found) bbClusterSelect.value = keep
   else if (_bbClusters.length) bbClusterSelect.value = _bbClusters[0].cluster_id
+  else bbClusterSelect.value = '__public__'
 }
 
 /** One POST to a Cluster's Switchboard. Host is the Cluster endpoint only. */
@@ -910,8 +917,38 @@ function bbOwnerSync(cluster) {
     .catch(function(e) { throw new Error('Owner sync failed: ' + e.message) })
 }
 
+/** Public (non-level) announcements — read-only, no scope. */
+function loadPublicBillboard() {
+  if (!_unlockedVault) return Promise.resolve()
+  bbNewBtn.style.display = 'none'
+  bbHideForm()
+  bbConfirm.style.display = 'none'
+  bbHideStatus()
+  bbList.innerHTML = ''
+  var loading = document.createElement('p')
+  loading.className = 'bb-empty'
+  loading.textContent = 'Loading…'
+  bbList.appendChild(loading)
+  return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'public' })
+    .then(function (resp) { return resp.text().then(function (t) {
+      var data = null; try { data = JSON.parse(t) } catch (e) { data = null }
+      if (!resp.ok || !data || !Array.isArray(data.posts)) {
+        throw new Error((data && (data.message || data.error)) || ('HTTP ' + resp.status))
+      }
+      renderBillboardPosts(data.posts)
+    })})
+    .catch(function (e) {
+      bbList.innerHTML = ''
+      var err = document.createElement('p')
+      err.className = 'bb-empty'
+      err.textContent = 'Could not load public announcements: ' + ((e && e.message) || e)
+      bbList.appendChild(err)
+    })
+}
+
 /** Read the selected Cluster: DID-signed proof + Switchboard cluster/list. */
 function loadClusterBillboard() {
+  if (bbClusterSelect.value === '__public__') return loadPublicBillboard()
   var cluster = bbSelectedCluster()
   if (!_unlockedVault || !cluster) return Promise.resolve()
 
@@ -1309,6 +1346,7 @@ function updateBillboardComposer() {
     bbNoCluster.style.display = 'block'
     bbCreateHint.style.display = 'none'
     bbNewBtn.style.display = 'none'
+    loadClusterBillboard()   // no Cluster → offer the non-level (public) feed
     return
   }
   bbNoCluster.style.display = 'none'
@@ -1453,6 +1491,9 @@ function activateService(name) {
   if (target === 'billboard') {
     updateBillboardComposer()
   }
+  if (target === 'calendar') {
+    calendarInit()
+  }
 }
 
 function serviceFromHash() {
@@ -1579,8 +1620,8 @@ function _assistScope() {
 }
 
 /** Sign one Switchboard request with the unlocked Passport (presentation). */
-function _assistSignedBody(service, action, data, scope) {
-  var host = _assistHost()
+function _assistSignedBody(service, action, data, scope, hostOverride) {
+  var host = hostOverride || _assistHost()
   var cred = _assistCredential()
   var sc   = scope || _assistScope()
   return fetch(host + '/api/switch/nonce')
@@ -1649,7 +1690,11 @@ function assistConfirm(plan) {
   var results = []
   actions.forEach(function (a) {
     chain = chain.then(function () {
-      return _assistSignedBody(a.service, a.action, a.data || {}, sc)
+      // Calendar entries belong to the DID itself (personal scope 'did').
+      var isCal = (a.service === 'calendar')
+      var asc   = isCal ? _calScope() : sc
+      var host  = isCal ? SPID_BOOTSTRAP_HOST : null
+      return _assistSignedBody(a.service, a.action, a.data || {}, asc, host)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
           var label = resp.ok ? 'OK'
@@ -1837,3 +1882,273 @@ assistRecBtn.addEventListener('click', assistRecordToggle)
   var rf = document.getElementById('assistMicRefresh')
   if (rf) rf.addEventListener('click', function () { assistLoadMics() })
 })()
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 7 — CALENDAR (agenda)
+//
+// The DID is the key: the view merges everything the DID holds a key to —
+// its OWN calendar (scope 'did' → level 'grape', its personal one) plus each
+// Cluster it belongs to (scope 'cluster'). One signed 'calendar/list' per
+// scope, merged here. Read-only — events are created through Assist.
+// ═════════════════════════════════════════════════════════════════════════
+
+var calMonthEl  = document.getElementById('calMonth')
+var calStripEl  = document.getElementById('calStrip')
+var calListEl   = document.getElementById('calList')
+var calPrevBtn  = document.getElementById('calPrev')
+var calNextBtn  = document.getElementById('calNext')
+var calTodayBtn = document.getElementById('calToday')
+
+var CAL_PALETTE = ['#e8c877', '#6da3e0', '#b18ad6', '#6fbf73', '#d9a441', '#c94961', '#8d939c']
+var _calAnchor  = null   // Date pinned to the 1st of the displayed month
+var _calSel     = null   // selected day, 'YYYY-MM-DD'
+var _calEvents  = []     // merged events, each tagged with _scope
+var _calLoaded  = false
+var _calLoading = false
+
+function _holderDid() {
+  return (_unlockedVault && _unlockedVault.identity && _unlockedVault.identity.id) || null
+}
+
+function _calScope() {
+  var did = _holderDid()
+  return did ? { type: 'did', id: did } : null
+}
+
+/** Every scope the DID holds a key to: its own (did) + each Cluster. */
+function _calScopes() {
+  var out = []
+  var did = _holderDid()
+  if (did) {
+    out.push({ type: 'did', id: did, host: SPID_BOOTSTRAP_HOST, label: 'Personnel', color: CAL_PALETTE[0] })
+  }
+  var clusters = buildClusterOptions(_unlockedVault)
+  for (var i = 0; i < clusters.length; i++) {
+    var c = clusters[i]
+    if (!c.endpoint) continue
+    out.push({
+      type: 'cluster', id: c.cluster_id, host: c.endpoint,
+      label: c.name || c.cluster_id,
+      color: CAL_PALETTE[1 + (Math.abs(_calHash(c.cluster_id)) % (CAL_PALETTE.length - 1))],
+    })
+  }
+  return out
+}
+
+function _calHash(s) {
+  var h = 0
+  s = String(s)
+  for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0 }
+  return h
+}
+
+/** Cluster/scope shown small under the title, abbreviated to 3 words. */
+function _shortScope(label) {
+  var w = String(label || '').trim().split(/\s+/)
+  return w.slice(0, 3).join(' ') || '—'
+}
+
+function _pad2(n) { return (n < 10 ? '0' : '') + n }
+function _dayKey(iso) { return String(iso || '').slice(0, 10) }
+function _todayKey() {
+  var d = new Date()
+  return d.getFullYear() + '-' + _pad2(d.getMonth() + 1) + '-' + _pad2(d.getDate())
+}
+function _hhmm(iso) {
+  var m = String(iso || '').match(/T(\d{2}):(\d{2})/)
+  return m ? (m[1] + ':' + m[2]) : ''
+}
+
+function calendarReset() { _calLoaded = false; _calEvents = [] }
+
+function calendarInit() {
+  if (!calMonthEl) return
+  if (!_calAnchor) {
+    var n = new Date()
+    _calAnchor = new Date(n.getFullYear(), n.getMonth(), 1)
+    _calSel    = _todayKey()
+  }
+  if (_calLoaded || _calLoading) { calendarRender(); return }
+  calendarLoad()
+}
+
+function calendarLoad() {
+  if (!_unlockedVault) { calendarEmpty('Ouvrez votre passport pour voir votre calendrier.'); return }
+  var scopes = _calScopes()
+  if (!scopes.length) { _calLoaded = true; calendarEmpty('Aucun calendrier accessible.'); return }
+
+  _calLoading = true
+  calendarEmpty('Chargement…')
+  var calls = scopes.map(function (sc) {
+    return _assistSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
+      .then(function (resp) { return resp.text().then(function (t) {
+        var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+        return { scope: sc, ok: resp.ok, status: resp.status, data: d }
+      })})
+      .catch(function (e) {
+        return { scope: sc, ok: false, status: 0, data: null, err: (e && e.message) || String(e) }
+      })
+  })
+
+  Promise.all(calls).then(function (rs) {
+    _calLoading = false
+    _calLoaded  = true
+    var merged = [], oks = 0
+    rs.forEach(function (r) {
+      if (r.ok && r.data && Array.isArray(r.data.events)) {
+        oks++
+        r.data.events.forEach(function (e) {
+          merged.push({ id: e.id, title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, _scope: r.scope })
+        })
+      }
+    })
+    _calEvents = merged
+    if (!oks && rs.length) {
+      calendarEmpty('Calendrier indisponible (aucune portée n\'a répondu).')
+      calendarRetry()
+      return
+    }
+    calendarRender()
+  })
+}
+
+function calendarEmpty(text) {
+  calListEl.innerHTML = ''
+  var p = document.createElement('p')
+  p.className = 'agenda-empty'
+  p.textContent = text
+  calListEl.appendChild(p)
+}
+
+function calendarRetry() {
+  var b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'btn btn-ghost'
+  b.textContent = 'Retry'
+  b.style.marginTop = '10px'
+  b.addEventListener('click', function () { _calLoaded = false; calendarLoad() })
+  calListEl.appendChild(b)
+}
+
+function calendarRender() {
+  if (!calMonthEl) return
+  var y = _calAnchor.getFullYear(), m = _calAnchor.getMonth()
+  var label = _calAnchor.toLocaleDateString('fr-CA', { month: 'long', year: 'numeric' })
+  calMonthEl.textContent = label.charAt(0).toUpperCase() + label.slice(1)
+
+  // Group by day.
+  var byDay = {}
+  _calEvents.forEach(function (e) {
+    var k = _dayKey(e.starts_at)
+    if (!k) return
+    ;(byDay[k] = byDay[k] || []).push(e)
+  })
+  Object.keys(byDay).forEach(function (k) {
+    byDay[k].sort(function (a, b) { return String(a.starts_at).localeCompare(String(b.starts_at)) })
+  })
+
+  var today = _todayKey()
+  var days  = new Date(y, m + 1, 0).getDate()
+  var names = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
+
+  // ── Day strip (whole displayed month) ──
+  calStripEl.innerHTML = ''
+  var selBtn = null
+  for (var i = 1; i <= days; i++) {
+    var dk = y + '-' + _pad2(m + 1) + '-' + _pad2(i)
+    var btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'agenda-day'
+    if (dk === today) btn.classList.add('is-today')
+    if (dk === _calSel) { btn.classList.add('is-sel'); selBtn = btn }
+
+    var dw = document.createElement('span'); dw.className = 'agenda-dow'
+    dw.textContent = names[new Date(y, m, i).getDay()]
+    var num = document.createElement('span'); num.className = 'agenda-num'
+    num.textContent = String(i)
+    var dots = document.createElement('span'); dots.className = 'agenda-dots'
+
+    var evs = byDay[dk] || [], seen = {}, uniq = []
+    for (var j = 0; j < evs.length; j++) {
+      var sid = evs[j]._scope ? evs[j]._scope.id : '_'
+      if (seen[sid]) continue
+      seen[sid] = 1
+      uniq.push(evs[j]._scope)
+      if (uniq.length >= 4) break
+    }
+    uniq.forEach(function (sc) {
+      var dot = document.createElement('span'); dot.className = 'agenda-dot'
+      dot.style.background = (sc && sc.color) || CAL_PALETTE[6]
+      if (sc && sc.label) dot.title = _shortScope(sc.label)
+      dots.appendChild(dot)
+    })
+
+    btn.appendChild(dw); btn.appendChild(num); btn.appendChild(dots)
+    ;(function (key) { btn.addEventListener('click', function () { calendarSelectDay(key) }) })(dk)
+    calStripEl.appendChild(btn)
+  }
+  if (selBtn) { try { selBtn.scrollIntoView({ inline: 'center', block: 'nearest' }) } catch (e) {} }
+
+  // ── Continuous list, grouped by day (all days shown above) ──
+  calListEl.innerHTML = ''
+  var any = false
+  for (var d = 1; d <= days; d++) {
+    var key = y + '-' + _pad2(m + 1) + '-' + _pad2(d)
+    var list = byDay[key] || []
+    if (!list.length) continue
+    any = true
+    var head = document.createElement('div')
+    head.className = 'agenda-day-head' + (key === today ? ' is-today' : '')
+    head.id = 'calday-' + key
+    head.textContent = _dayLabel(y, m, d)
+    calListEl.appendChild(head)
+    list.forEach(function (e) { calListEl.appendChild(calendarItem(e)) })
+  }
+  if (!any) calendarEmpty('Aucune entrée dans ce mois.')
+}
+
+function _dayLabel(y, m, d) {
+  var names = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
+  var mois  = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc']
+  return names[new Date(y, m, d).getDay()] + ' ' + d + ' ' + mois[m]
+}
+
+function calendarItem(e) {
+  var row = document.createElement('div'); row.className = 'agenda-item'
+  var bar = document.createElement('span'); bar.className = 'agenda-bar'
+  bar.style.background = (e._scope && e._scope.color) || CAL_PALETTE[6]
+  var body = document.createElement('div'); body.className = 'agenda-body'
+  var line = document.createElement('div'); line.className = 'agenda-line'
+  var t = document.createElement('span'); t.className = 'agenda-time'; t.textContent = _hhmm(e.starts_at)
+  var ti = document.createElement('span'); ti.className = 'agenda-title'; ti.textContent = e.title || '(sans titre)'
+  line.appendChild(t); line.appendChild(ti)
+  var sc = document.createElement('span'); sc.className = 'agenda-scope'
+  sc.textContent = _shortScope(e._scope && e._scope.label)
+  body.appendChild(line); body.appendChild(sc)
+  row.appendChild(bar); row.appendChild(body)
+  return row
+}
+
+function calendarSelectDay(key) {
+  _calSel = key
+  calendarRender()
+  var head = document.getElementById('calday-' + key)
+  if (head) { try { head.scrollIntoView({ block: 'nearest' }) } catch (e) {} }
+}
+
+function calendarShiftMonth(delta) {
+  if (!_calAnchor) return
+  _calAnchor = new Date(_calAnchor.getFullYear(), _calAnchor.getMonth() + delta, 1)
+  calendarRender()
+}
+
+function calendarTodayGo() {
+  var n = new Date()
+  _calAnchor = new Date(n.getFullYear(), n.getMonth(), 1)
+  _calSel    = _todayKey()
+  calendarRender()
+}
+
+if (calPrevBtn)  calPrevBtn.addEventListener('click', function () { calendarShiftMonth(-1) })
+if (calNextBtn)  calNextBtn.addEventListener('click', function () { calendarShiftMonth(1) })
+if (calTodayBtn) calTodayBtn.addEventListener('click', calendarTodayGo)

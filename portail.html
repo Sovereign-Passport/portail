@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign Passport — Universal Switchboard</title>
-<link rel="stylesheet" href="portail.css">
+<link rel="stylesheet" href="portail.css?v=8">
 </head>
 <body>
 
@@ -147,7 +147,16 @@
       </section>
 
       <section class="tab-panel" id="panel-calendar" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0" hidden>
-        <p class="service-soon">Service in preparation</p>
+        <div class="agenda">
+          <div class="agenda-head">
+            <button class="agenda-nav" id="calPrev" type="button" aria-label="Mois précédent">‹</button>
+            <div class="agenda-month" id="calMonth">—</div>
+            <button class="agenda-nav" id="calNext" type="button" aria-label="Mois suivant">›</button>
+            <button class="btn btn-ghost agenda-today" id="calToday" type="button">Aujourd'hui</button>
+          </div>
+          <div class="agenda-strip" id="calStrip"></div>
+          <div class="agenda-list" id="calList"></div>
+        </div>
       </section>
 
       <section class="tab-panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" tabindex="0" hidden>
@@ -162,6 +171,6 @@
     </div>
   </div>
 
-<script src="portail.js?v=7"></script>
+<script src="portail.js?v=8"></script>
 </body>
 </html>
