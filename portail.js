@@ -1688,10 +1688,12 @@ function assistConfirm(plan) {
   var sc = _assistScope()
   var chain = Promise.resolve()
   var results = []
+  var touchedCalendar = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
       // Calendar entries belong to the DID itself (personal scope 'did').
       var isCal = (a.service === 'calendar')
+      if (isCal) touchedCalendar = true
       var asc   = isCal ? _calScope() : sc
       var host  = isCal ? SPID_BOOTSTRAP_HOST : null
       return _assistSignedBody(a.service, a.action, a.data || {}, asc, host)
@@ -1709,6 +1711,11 @@ function assistConfirm(plan) {
   chain.then(function () {
     assistSetStatus('')
     assistLine('Résultat : ' + results.join(' ; '))
+    // A signed calendar write invalidates the cached view.
+    if (touchedCalendar) {
+      calendarReset()
+      if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
+    }
   })
 }
 
@@ -1925,9 +1932,12 @@ function _calScopes() {
   var clusters = buildClusterOptions(_unlockedVault)
   for (var i = 0; i < clusters.length; i++) {
     var c = clusters[i]
-    if (!c.endpoint) continue
+    // Owned clusters live on the home Vine (same rule as the Billboard view);
+    // joined clusters keep their own endpoint.
+    var host = c.owned ? SPID_BOOTSTRAP_HOST : c.endpoint
+    if (!host) continue
     out.push({
-      type: 'cluster', id: c.cluster_id, host: c.endpoint,
+      type: 'cluster', id: c.cluster_id, host: host,
       label: c.name || c.cluster_id,
       color: CAL_PALETTE[1 + (Math.abs(_calHash(c.cluster_id)) % (CAL_PALETTE.length - 1))],
     })
