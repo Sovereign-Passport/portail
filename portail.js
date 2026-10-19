@@ -1691,6 +1691,12 @@ function assistConfirm(plan) {
   var touchedCalendar = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
+      if (a.service === 'billboard' && a.action === 'action') {
+        // Edit / repost a Billboard post — resolved + signed here (no bypass).
+        return assistBillboardPostOp(a)
+          .then(function () { results.push('billboard/action (' + ((a.data || {}).op || '?') + ') → OK') })
+          .catch(function (e) { results.push('billboard/action → erreur (' + e.message + ')') })
+      }
       // Calendar entries belong to the DID itself (personal scope 'did').
       var isCal = (a.service === 'calendar')
       if (isCal) touchedCalendar = true
@@ -1719,6 +1725,110 @@ function assistConfirm(plan) {
   })
 }
 
+// ── Billboard post operations (edit / repost-public) ─────────────────────
+// Option A : rien ne contourne le Switchboard. Le Passport (cette page) émet
+// une LECTURE SB en arrière-plan pour résoudre la cible, puis SIGNE l'action SB.
+
+/** One signed cluster read (no bypass) — returns the posts, or []. */
+function assistClusterPosts(cluster, host) {
+  var did = _unlockedVault.identity.id
+  var timestamp = Date.now()
+  var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
+  return importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(proof)) })
+    .then(function (signature) {
+      return bbSwitch(host, {
+        service: 'billboard', action: 'cluster/list',
+        data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+      })
+    })
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      return (d && d.posts) || []
+    })})
+    .catch(function () { return [] })
+}
+
+/** Background SB reads: public feed + every Cluster the DID belongs to. */
+function assistReadAllPosts() {
+  var jobs = []
+  jobs.push(bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'public' })
+    .then(function (resp) { return resp.text() })
+    .then(function (t) { var d = null; try { d = JSON.parse(t) } catch (e) { d = null }; return (d && d.posts) || [] })
+    .catch(function () { return [] }))
+  buildClusterOptions(_unlockedVault).forEach(function (c) {
+    var host = c.owned ? SPID_BOOTSTRAP_HOST : c.endpoint
+    if (host) jobs.push(assistClusterPosts(c, host))
+  })
+  return Promise.all(jobs).then(function (lists) {
+    var out = []
+    lists.forEach(function (l) { (l || []).forEach(function (p) { out.push(p) }) })
+    return out
+  })
+}
+
+/** Resolve the target post, then sign + send the Switchboard action. */
+function assistBillboardPostOp(a) {
+  if (!_unlockedVault) return Promise.reject(new Error('passport verrouillé'))
+  var d   = a.data || {}
+  var op  = d.op
+  var ref = String(d.ref || '').trim()
+  return assistReadAllPosts().then(function (posts) {
+    var found = null
+    for (var i = 0; i < posts.length; i++) {
+      var p = posts[i] || {}
+      if (!ref || String(p.title || '').toLowerCase().indexOf(ref.toLowerCase()) !== -1) { found = p; break }
+    }
+    if (!found) throw new Error('annonce introuvable (ref: ' + (ref || '—') + ')')
+
+    var action, postId, version, title, body, scope, clusterId
+    if (op === 'update') {
+      action    = 'update'
+      postId    = found.post_id
+      version   = (found.version || 1) + 1
+      title     = d.title || found.title
+      body      = d.body  || found.body
+      scope     = found.scope === 'public' ? 'public' : 'cluster'
+      clusterId = scope === 'cluster' ? found.cluster_id : null
+    } else {                              // repost-public
+      action    = 'create'
+      postId    = uuid()
+      version   = 1
+      title     = found.title
+      body      = found.body
+      scope     = 'public'
+      clusterId = null
+    }
+
+    // Exact backend key order (must match how the Switchboard re-serialises).
+    var payload = {
+      id:         uuid(),
+      type:       'BillboardAction',
+      action:     action,
+      actor_did:  _unlockedVault.identity.id,
+      post_id:    postId,
+      scope:      scope,
+      cluster_id: clusterId,
+      version:    version,
+      title:      title,
+      body:       body,
+      expires_at: null,
+      issued_at:  nowIso(),
+    }
+    return importPrivateKey(_unlockedVault.keys.privateKey)
+      .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+      .then(function (sig) {
+        payload.signature = sig
+        return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'action', data: payload })
+      })
+      .then(function (resp) { return resp.text().then(function (t) {
+        var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
+        if (!resp.ok) throw new Error((r && (r.error || r.message)) || ('HTTP ' + resp.status))
+        return true
+      })})
+  })
+}
+
 function assistSubmit(text) {
   if (!text) return
   assistSetStatus('Planification…')
@@ -1728,6 +1838,12 @@ function assistSubmit(text) {
       if (!resp.ok) {
         assistSetStatus('')
         assistLine('Erreur : ' + ((d && (d.detail || d.error)) || resp.status))
+        return
+      }
+      if (d && d.status === 'not_possible') {
+        assistSetStatus('')
+        assistLine('Assist : ' + (d.message || "Cette demande n'est pas possible."))
+        _assistDraft = ''
         return
       }
       if (d && d.status === 'needs_clarification' && d.question) {
