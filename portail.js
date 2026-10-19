@@ -1542,8 +1542,6 @@ var assistPlanBox = document.getElementById('assistPlanBox')
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
 
-console.log('Orbit Assist UI v6')
-
 function assistInit() {
   assistDivider.style.display = 'flex'
   assistField.style.display   = 'block'
@@ -1807,10 +1805,7 @@ function assistRecordToggle() {
             var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
             assistSetStatus('')
             if (!resp.ok || !d || !d.text) {
-              var why = (d && (d.stt_error || d.detail || d.error)) || ('HTTP ' + resp.status)
-              var dur = (d && d.seconds) ? (', ' + d.seconds + ' s audio') : ''
-              var lvl = (d && d.peak != null) ? (', niveau ' + d.peak) : ''
-              assistLine('Transcription vide (' + blob.size + ' o' + dur + lvl + ') : ' + why)
+              assistLine('Transcription indisponible : ' + ((d && (d.detail || d.error)) || ('HTTP ' + resp.status)))
               return
             }
             assistInput.value = d.text
