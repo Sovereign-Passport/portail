@@ -1585,6 +1585,16 @@ function _uiLang() {
   return 'en'
 }
 
+// Spoken language for STT: the EXPLICIT choice only, else FR.
+// Never the display default — a wrong model transcribes as hallucinated words.
+function _voiceLang() {
+  try {
+    var s = localStorage.getItem('spidLang')
+    if (s && _LANGS.indexOf(s) !== -1) return s
+  } catch (e) {}
+  return 'fr'
+}
+
 var assistDivider = document.getElementById('assistDivider')
 var assistField   = document.getElementById('assistField')
 var assistInput   = document.getElementById('assistInput')
@@ -2078,7 +2088,7 @@ function assistRecordToggle() {
       var reader = new FileReader()
       reader.onload = function () {
         var b64 = String(reader.result).split(',')[1] || ''
-        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm', lang: _uiLang() })
+        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm', lang: _voiceLang() })
           .then(function (resp) { return resp.text().then(function (t) {
             var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
             assistSetStatus('')
