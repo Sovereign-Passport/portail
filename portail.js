@@ -1570,6 +1570,21 @@ activateService(serviceFromHash())
 // Switchboard (calendar/messages/finance/checklist). Nothing runs server-side.
 // ═════════════════════════════════════════════════════════════════════════
 
+// UI language: localStorage override → browser preference → EN (default).
+var _LANGS = ['fr', 'en', 'es']
+function _uiLang() {
+  try {
+    var saved = localStorage.getItem('spidLang')
+    if (saved && _LANGS.indexOf(saved) !== -1) return saved
+  } catch (e) {}
+  var langs = navigator.languages || [navigator.language || '']
+  for (var i = 0; i < langs.length; i++) {
+    var l = String(langs[i] || '').slice(0, 2).toLowerCase()
+    if (_LANGS.indexOf(l) !== -1) return l
+  }
+  return 'en'
+}
+
 var assistDivider = document.getElementById('assistDivider')
 var assistField   = document.getElementById('assistField')
 var assistInput   = document.getElementById('assistInput')
@@ -2063,7 +2078,7 @@ function assistRecordToggle() {
       var reader = new FileReader()
       reader.onload = function () {
         var b64 = String(reader.result).split(',')[1] || ''
-        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm' })
+        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm', lang: _uiLang() })
           .then(function (resp) { return resp.text().then(function (t) {
             var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
             assistSetStatus('')
