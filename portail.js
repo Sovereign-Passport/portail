@@ -1697,6 +1697,13 @@ function assistConfirm(plan) {
           .then(function () { results.push('billboard/action (' + ((a.data || {}).op || '?') + ') → OK') })
           .catch(function (e) { results.push('billboard/action → erreur (' + e.message + ')') })
       }
+      if (a.service === 'calendar' && a.action === 'update') {
+        // Move / edit a calendar entry — resolved + signed here (no bypass).
+        touchedCalendar = true
+        return assistCalendarUpdate(a)
+          .then(function () { results.push('calendar/update → OK') })
+          .catch(function (e) { results.push('calendar/update → erreur (' + e.message + ')') })
+      }
       // Calendar entries belong to the DID itself (personal scope 'did').
       var isCal = (a.service === 'calendar')
       if (isCal) touchedCalendar = true
@@ -1806,6 +1813,66 @@ function assistSendBillboardAction(payload) {
       if (!resp.ok) throw new Error((r && (r.error || r.message)) || ('HTTP ' + resp.status))
       return r || {}
     })})
+}
+
+/** Background SB reads of the DID's calendar: personal + each Cluster. */
+function assistReadAllCalendar() {
+  if (!_unlockedVault) return Promise.resolve([])
+  var jobs = _calScopes().map(function (sc) {
+    return _assistSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
+      .then(function (resp) { return resp.text().then(function (t) {
+        var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+        return ((d && d.events) || []).map(function (e) {
+          e._scopeType = sc.type; e._scopeId = sc.id; e._host = sc.host
+          return e
+        })
+      })})
+      .catch(function () { return [] })
+  })
+  return Promise.all(jobs).then(function (lists) {
+    var out = []
+    lists.forEach(function (l) { l.forEach(function (e) { out.push(e) }) })
+    return out
+  })
+}
+
+/** Resolve the calendar entry by title, then sign + send calendar/update. */
+function assistCalendarUpdate(a) {
+  if (!_unlockedVault) return Promise.reject(new Error('passport verrouillé'))
+  var d   = a.data || {}
+  var ref = String(d.ref || '').trim()
+  return assistReadAllCalendar().then(function (events) {
+    var nref = _assistNorm(ref)
+    var found = null
+    for (var i = 0; i < events.length; i++) {
+      var t = _assistNorm(events[i].title)
+      if (!nref || t.indexOf(nref) !== -1) { found = events[i]; break }
+    }
+    if (!found) {
+      var ts = events.map(function (e) { return e.title }).slice(0, 6).join(' | ')
+      throw new Error('entrée introuvable (ref: "' + ref + '", ' + events.length +
+                      ' lue(s)' + (ts ? ' : ' + ts : '') + ')')
+    }
+    var body = { id: found.id }
+    if (d.title)    body.title     = d.title
+    if (d.starts_at) {
+      // Date-only change keeps the original time of day.
+      var sv = d.starts_at
+      if (sv.indexOf('T') === -1 && found.starts_at && found.starts_at.indexOf('T') !== -1) {
+        sv = sv + found.starts_at.slice(found.starts_at.indexOf('T'))
+      }
+      body.starts_at = sv
+    }
+    if (d.ends_at)  body.ends_at   = d.ends_at
+    if (d.location) body.data      = { location: d.location }
+    return _assistSignedBody('calendar', 'update', body,
+        { type: found._scopeType, id: found._scopeId }, found._host)
+      .then(function (resp) { return resp.text().then(function (t) {
+        var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
+        if (!resp.ok) throw new Error((r && (r.error || r.message)) || ('HTTP ' + resp.status))
+        return true
+      })})
+  })
 }
 
 /** Resolve the target post, then sign + send the Switchboard action. */
