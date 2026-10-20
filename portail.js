@@ -347,6 +347,9 @@ unlockBtn.addEventListener('click', function() {
     .then(function(result) {
       _unlockedVault = result.vault
       _vaultKey      = result.vaultKey
+      if (_unlockedVault.prefs && _unlockedVault.prefs.lang) {
+        try { spidAdoptLang(_unlockedVault.prefs.lang) } catch (e) {}
+      }
       updateBillboardComposer()
       unlockField.style.display = 'none'
       showMsg('info', 'Passport unlocked. Asking your vine…')
@@ -1593,6 +1596,19 @@ function _voiceLang() {
     if (s && _LANGS.indexOf(s) !== -1) return s
   } catch (e) {}
   return 'fr'
+}
+
+// Durable mirror of the language choice inside the DID's vault (best effort).
+function spidPersistLang(l) {
+  if (!_unlockedVault || !_vaultKey || !_storedPayload) return null
+  _unlockedVault.prefs = _unlockedVault.prefs || {}
+  _unlockedVault.prefs.lang = l
+  return encryptVault(_vaultKey, JSON.stringify(_unlockedVault)).then(function (e) {
+    return persistVault({
+      key: 'current', salt: _storedPayload.salt, iv: e.iv, ciphertext: e.ciphertext,
+      did: _unlockedVault.identity.id, created_at: _storedPayload.created_at, updated_at: nowIso(),
+    })
+  }).catch(function () {})
 }
 
 var assistDivider = document.getElementById('assistDivider')

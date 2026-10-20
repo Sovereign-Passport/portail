@@ -130,19 +130,29 @@
     return raw;
   }
 
+  var ORIG = new WeakMap();
+
   function txt(node) {
-    var raw = node.nodeValue;
-    if (!raw || !raw.trim()) return;
-    var out = xlate(raw);
+    var src;
+    if (ORIG.has(node)) { src = ORIG.get(node); }
+    else { src = node.nodeValue; ORIG.set(node, src); }
+    if (!src || !src.trim()) return;
+    var out = xlate(src);
     if (node.nodeValue !== out) node.nodeValue = out;
   }
 
   function attrs(el) {
     ['placeholder', 'title', 'aria-label'].forEach(function (a) {
-      var v = el.getAttribute && el.getAttribute(a);
-      if (!v) return;
-      var out = xlate(v);
-      if (out !== v) el.setAttribute(a, out);
+      if (!el.getAttribute) return;
+      var key = 'data-spid-src-' + a;
+      var src = el.getAttribute(key);
+      if (src === null) {
+        src = el.getAttribute(a);
+        if (!src) return;
+        el.setAttribute(key, src);
+      }
+      var out = xlate(src);
+      if (el.getAttribute(a) !== out) el.setAttribute(a, out);
     });
   }
 
@@ -188,12 +198,32 @@
 
   function setLang(l) {
     if (LANGS.indexOf(l) < 0) l = 'en';
+    lang = l;
     try { localStorage.setItem('spidLang', l); } catch (e) {}
-    location.reload();
+    document.documentElement.lang = l;
+    document.documentElement.setAttribute('data-spid-lang', l);
+    apply(document.body);
+    wire();
+    // Durable mirror inside the DID's vault (best effort, may be locked).
+    if (typeof global.spidPersistLang === 'function') {
+      try { global.spidPersistLang(l); } catch (e) {}
+    }
+  }
+
+  // Re-render in the vault's stored language, once the vault is known.
+  function adopt(l) {
+    if (LANGS.indexOf(l) < 0 || l === lang) return;
+    lang = l;
+    try { localStorage.setItem('spidLang', l); } catch (e) {}
+    document.documentElement.lang = l;
+    document.documentElement.setAttribute('data-spid-lang', l);
+    apply(document.body);
+    wire();
   }
 
   global.spidLang = function () { return lang; };
   global.spidSetLang = setLang;
+  global.spidAdoptLang = adopt;
   global.spidApply = apply;
 
   if (document.readyState === 'loading') {
