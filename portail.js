@@ -1002,9 +1002,11 @@ function loadClusterBillboard() {
     return importPrivateKey(_unlockedVault.keys.privateKey)
       .then(function(privateKey) { return edSign(privateKey, JSON.stringify(proof)) })
       .then(function(signature) {
-        return bbSwitch(host, {
-          service: 'billboard', action: 'cluster/list',
-          data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+        return fetch(host + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
+          return bbSwitch(host, {
+            service: 'billboard', action: 'cluster/list', nonce: nd && nd.nonce,
+            data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+          })
         })
       })
   })
@@ -1793,9 +1795,11 @@ function assistClusterPosts(cluster, host) {
     .then(function () { return importPrivateKey(_unlockedVault.keys.privateKey) })
     .then(function (pk) { return edSign(pk, JSON.stringify(proof)) })
     .then(function (signature) {
-      return bbSwitch(host, {
-        service: 'billboard', action: 'cluster/list',
-        data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+      return fetch(host + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
+        return bbSwitch(host, {
+          service: 'billboard', action: 'cluster/list', nonce: nd && nd.nonce,
+          data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
+        })
       })
     })
     .then(function (resp) { return resp.text().then(function (t) {
