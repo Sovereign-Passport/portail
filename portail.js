@@ -1641,10 +1641,25 @@ function assistLine(text) {
   p.textContent = text
   assistLog.appendChild(p)
 }
-function assistSetStatus(text) {
-  if (!text) { assistStatus.style.display = 'none'; assistStatus.textContent = ''; return }
+function assistSetStatus(text, loading) {
+  if (!text) {
+    assistStatus.style.display = 'none'
+    assistStatus.textContent = ''
+    assistStatus.classList.remove('loading')
+    return
+  }
   assistStatus.textContent = text
   assistStatus.style.display = 'block'
+  assistStatus.classList.toggle('loading', !!loading)
+}
+
+// Busy = a plan/execution is in flight: block duplicate submits, show a spinner.
+var _assistBusy = false
+function assistSetBusy(on) {
+  _assistBusy = !!on
+  if (assistSendBtn) assistSendBtn.disabled = _assistBusy
+  if (assistRecBtn)  assistRecBtn.disabled  = _assistBusy
+  if (!_assistBusy) assistSetStatus('')
 }
 
 function _assistCredential() {
@@ -1722,7 +1737,12 @@ function assistRenderPlan(plan) {
     ok.className = 'btn btn-gold'; ok.type = 'button'
     ok.textContent = 'Confirmer et exécuter'
     ok.style.marginTop = '12px'
-    ok.addEventListener('click', function () { assistConfirm(plan) })
+    ok.addEventListener('click', function () {
+      if (_assistBusy) return
+      ok.disabled = true
+      ok.textContent = 'Exécution…'
+      assistConfirm(plan)
+    })
     assistPlanBox.appendChild(ok)
   }
 }
@@ -1730,7 +1750,8 @@ function assistRenderPlan(plan) {
 function assistConfirm(plan) {
   var actions = plan.actions || []
   if (!actions.length) return
-  assistSetStatus('Exécution signée…')
+  assistSetBusy(true)
+  assistSetStatus('Exécution signée…', true)
   assistPlanBox.style.display = 'none'
   var sc = _assistScope()
   var chain = Promise.resolve()
@@ -1769,7 +1790,7 @@ function assistConfirm(plan) {
     })
   })
   chain.then(function () {
-    assistSetStatus('')
+    assistSetBusy(false)
     assistLine('Résultat : ' + results.join(' ; '))
     // A signed calendar write invalidates the cached view.
     if (touchedCalendar) {
@@ -1974,11 +1995,13 @@ function assistBillboardPostOp(a) {
 }
 
 function assistSubmit(text) {
-  if (!text) return
-  assistSetStatus('Planification…')
+  if (!text || _assistBusy) return
+  assistSetBusy(true)
+  assistSetStatus('Planification…', true)
   _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope(), lang: _uiLang() })
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      assistSetBusy(false)
       if (!resp.ok) {
         assistSetStatus('')
         assistLine('Erreur : ' + ((d && (d.detail || d.error)) || resp.status))
@@ -2000,10 +2023,11 @@ function assistSubmit(text) {
       assistSetStatus('')
       assistRenderPlan(d || {})
     })})
-    .catch(function (e) { assistSetStatus(''); assistLine('Erreur : ' + e.message) })
+    .catch(function (e) { assistSetBusy(false); assistLine('Erreur : ' + e.message) })
 }
 
 function assistSend() {
+  if (_assistBusy) return
   var text = (assistInput.value || '').trim()
   if (!text) return
   assistInput.value = ''
@@ -2063,6 +2087,7 @@ function _assistStopMeter() {
 }
 
 function assistRecordToggle() {
+  if (_assistBusy) return
   if (_assistRecorder) { _assistRecorder.stop(); return }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     assistLine('Enregistrement non supporté par ce navigateur.')
