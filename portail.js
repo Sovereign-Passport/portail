@@ -1734,7 +1734,11 @@ function assistClusterPosts(cluster, host) {
   var did = _unlockedVault.identity.id
   var timestamp = Date.now()
   var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
-  return importPrivateKey(_unlockedVault.keys.privateKey)
+  // Owned clusters must present their exact owner proof first (as the view does).
+  var prep = (cluster.owned && cluster.ownerProof)
+    ? bbOwnerSync(cluster).catch(function () {}) : Promise.resolve()
+  return prep
+    .then(function () { return importPrivateKey(_unlockedVault.keys.privateKey) })
     .then(function (pk) { return edSign(pk, JSON.stringify(proof)) })
     .then(function (signature) {
       return bbSwitch(host, {
@@ -1767,6 +1771,43 @@ function assistReadAllPosts() {
   })
 }
 
+/** Accent/case-insensitive normal form for title matching. */
+function _assistNorm(s) {
+  return String(s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Find the post whose title best matches `ref` (accent-insensitive, word-wise). */
+function _assistMatchPost(posts, ref) {
+  var nref = _assistNorm(ref)
+  if (!nref) return posts[0] || null
+  var rwords = nref.split(' ')
+  for (var i = 0; i < posts.length; i++) {
+    var nt = _assistNorm(posts[i].title)
+    if (nt.indexOf(nref) !== -1) return posts[i]
+    var all = true
+    for (var j = 0; j < rwords.length; j++) { if (nt.indexOf(rwords[j]) === -1) { all = false; break } }
+    if (all) return posts[i]
+  }
+  return null
+}
+
+/** Sign + send one BillboardAction through the Switchboard. */
+function assistSendBillboardAction(payload) {
+  return importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+    .then(function (sig) {
+      payload.signature = sig
+      return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'action', data: payload })
+    })
+    .then(function (resp) { return resp.text().then(function (t) {
+      var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
+      if (!resp.ok) throw new Error((r && (r.error || r.message)) || ('HTTP ' + resp.status))
+      return r || {}
+    })})
+}
+
 /** Resolve the target post, then sign + send the Switchboard action. */
 function assistBillboardPostOp(a) {
   if (!_unlockedVault) return Promise.reject(new Error('passport verrouillé'))
@@ -1774,58 +1815,45 @@ function assistBillboardPostOp(a) {
   var op  = d.op
   var ref = String(d.ref || '').trim()
   return assistReadAllPosts().then(function (posts) {
-    var found = null
-    for (var i = 0; i < posts.length; i++) {
-      var p = posts[i] || {}
-      if (!ref || String(p.title || '').toLowerCase().indexOf(ref.toLowerCase()) !== -1) { found = p; break }
+    var found = _assistMatchPost(posts, ref)
+    if (!found) {
+      var titles = posts.map(function (p) { return p.title }).slice(0, 6).join(' | ')
+      throw new Error('annonce introuvable (ref: "' + ref + '", ' + posts.length +
+                      ' annonce(s) lue(s)' + (titles ? ' : ' + titles : '') + ')')
     }
-    if (!found) throw new Error('annonce introuvable (ref: ' + (ref || '—') + ')')
+    var scope     = found.scope === 'public' ? 'public' : 'cluster'
+    var clusterId = scope === 'cluster' ? found.cluster_id : null
 
-    var action, postId, version, title, body, scope, clusterId
     if (op === 'update') {
-      action    = 'update'
-      postId    = found.post_id
-      version   = (found.version || 1) + 1
-      title     = d.title || found.title
-      body      = d.body  || found.body
-      scope     = found.scope === 'public' ? 'public' : 'cluster'
-      clusterId = scope === 'cluster' ? found.cluster_id : null
-    } else {                              // repost-public
-      action    = 'create'
-      postId    = uuid()
-      version   = 1
-      title     = found.title
-      body      = found.body
-      scope     = 'public'
-      clusterId = null
+      var newTitle = d.title || found.title
+      if (newTitle && newTitle.charAt(0) !== '[') newTitle = '[révisé] ' + newTitle
+      return assistSendBillboardAction({
+        id: uuid(), type: 'BillboardAction', action: 'update',
+        actor_did: _unlockedVault.identity.id, post_id: found.post_id,
+        scope: scope, cluster_id: clusterId, version: (found.version || 1) + 1,
+        title: newTitle, body: d.body || found.body,
+        expires_at: found.expires_at || null, issued_at: nowIso(),
+      })
     }
 
-    // Exact backend key order (must match how the Switchboard re-serialises).
-    var payload = {
-      id:         uuid(),
-      type:       'BillboardAction',
-      action:     action,
-      actor_did:  _unlockedVault.identity.id,
-      post_id:    postId,
-      scope:      scope,
-      cluster_id: clusterId,
-      version:    version,
-      title:      title,
-      body:       body,
-      expires_at: null,
-      issued_at:  nowIso(),
-    }
-    return importPrivateKey(_unlockedVault.keys.privateKey)
-      .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
-      .then(function (sig) {
-        payload.signature = sig
-        return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'action', data: payload })
-      })
-      .then(function (resp) { return resp.text().then(function (t) {
-        var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
-        if (!resp.ok) throw new Error((r && (r.error || r.message)) || ('HTTP ' + resp.status))
-        return true
-      })})
+    // repost-public: create the public version, then archive the original
+    // (we keep a single active version) once the new one is confirmed active.
+    return assistSendBillboardAction({
+      id: uuid(), type: 'BillboardAction', action: 'create',
+      actor_did: _unlockedVault.identity.id, post_id: uuid(),
+      scope: 'public', cluster_id: null, version: 1,
+      title: found.title, body: found.body, expires_at: null, issued_at: nowIso(),
+    }).then(function (r) {
+      var np = r && r.post
+      if (np && np.status && np.status !== 'active') return r
+      return assistSendBillboardAction({
+        id: uuid(), type: 'BillboardAction', action: 'archive',
+        actor_did: _unlockedVault.identity.id, post_id: found.post_id,
+        scope: scope, cluster_id: clusterId, version: (found.version || 1) + 1,
+        title: found.title, body: found.body,
+        expires_at: found.expires_at || null, issued_at: nowIso(),
+      }).catch(function () {}).then(function () { return r })
+    })
   })
 }
 
