@@ -1952,7 +1952,7 @@ function assistBillboardPostOp(a) {
 function assistSubmit(text) {
   if (!text) return
   assistSetStatus('Planification…')
-  _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope() })
+  _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope(), lang: _uiLang() })
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       if (!resp.ok) {
