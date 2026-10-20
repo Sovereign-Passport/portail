@@ -347,9 +347,13 @@ unlockBtn.addEventListener('click', function() {
     .then(function(result) {
       _unlockedVault = result.vault
       _vaultKey      = result.vaultKey
-      if (_unlockedVault.prefs && _unlockedVault.prefs.lang) {
-        try { spidAdoptLang(_unlockedVault.prefs.lang) } catch (e) {}
-      }
+      try {
+        var vlang = _unlockedVault.prefs && _unlockedVault.prefs.lang
+        var llang = null
+        try { llang = localStorage.getItem('spidLang') } catch (e) {}
+        if (!llang && vlang) spidAdoptLang(vlang)          // fresh device → vault wins
+        else if (llang && llang !== vlang) spidPersistLang(llang)  // local (recent) wins
+      } catch (e) {}
       updateBillboardComposer()
       unlockField.style.display = 'none'
       showMsg('info', 'Passport unlocked. Asking your vine…')
