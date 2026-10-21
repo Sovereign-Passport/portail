@@ -468,3 +468,29 @@ html.embed .panel { margin-bottom: 0; }
   font-size: 12.5px; color: var(--text-dim);
   border: 1px dashed rgba(255,255,255,0.15); border-radius: 10px;
 }
+
+/* ── Messages (DID-centric) ─────────────────────────────────────── */
+/* Unread dot on the tab. */
+.tab-dot {
+  display: inline-block; width: 7px; height: 7px; margin-left: 5px; vertical-align: 1px;
+  border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 6px rgba(111,191,115,0.8);
+  animation: dotpulse 1.6s ease-in-out infinite;
+}
+@keyframes dotpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.ms-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+.ms-bar .btn { width: auto; flex: 1; }
+.ms-bar .btn[aria-pressed="true"] { border-color: var(--gold); color: var(--gold-bright); }
+.ms-msg {
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; padding: 10px 12px;
+}
+.ms-msg.unread { border-color: rgba(111,191,115,0.45); }
+.ms-msg .ms-peer {
+  font-size: 10.5px; color: var(--text-dim); font-family: 'Courier New', monospace;
+  word-break: break-all;
+}
+.ms-msg .ms-body { font-size: 13.5px; color: var(--text); margin-top: 5px; white-space: pre-wrap; word-break: break-word; }
+.ms-msg .ms-meta { display: flex; align-items: center; gap: 10px; margin-top: 7px; font-size: 10.5px; color: var(--text-dim); }
+.ms-msg .ms-meta .btn { width: auto; padding: 5px 12px; font-size: 10px; }

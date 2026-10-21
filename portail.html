@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign Passport — Universal Switchboard</title>
-<link rel="stylesheet" href="portail.css?v=10">
+<link rel="stylesheet" href="portail.css?v=11">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
         <button class="tab" id="tab-calendar" role="tab" type="button"
                 aria-controls="panel-calendar" aria-selected="false" data-service="calendar" tabindex="-1">Calendar</button>
         <button class="tab" id="tab-messages" role="tab" type="button"
-                aria-controls="panel-messages" aria-selected="false" data-service="messages" tabindex="-1">Messages</button>
+                aria-controls="panel-messages" aria-selected="false" data-service="messages" tabindex="-1">Messages<span class="tab-dot" id="msgDot" style="display:none"></span></button>
       </div>
 
       <!-- Assist — current Passport detection and access flow (unchanged) -->
@@ -165,7 +165,26 @@
       </section>
 
       <section class="tab-panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" tabindex="0" hidden>
-        <p class="service-soon">Service in preparation</p>
+        <div class="ms-bar">
+          <button class="btn btn-ghost" id="msInboxBtn" type="button" aria-pressed="true">Boîte</button>
+          <button class="btn btn-ghost" id="msSentBtn" type="button" aria-pressed="false">Envoyés</button>
+          <button class="btn btn-ghost" id="msRefreshBtn" type="button">&#8635;</button>
+        </div>
+        <div id="msStatus" class="bb-status" style="display:none;"></div>
+        <div id="msList" class="bb-list"></div>
+
+        <div class="divider">nouveau message</div>
+        <div class="field">
+          <label>Destinataire (DID)</label>
+          <input id="msTo" class="did-input" type="text" placeholder="did:key:z…" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Message</label>
+          <textarea id="msBody" class="bb-textarea" rows="2" placeholder="Court et direct…"></textarea>
+        </div>
+        <div class="bb-actions">
+          <button class="btn btn-gold" id="msSendBtn" type="button">Envoyer</button>
+        </div>
       </section>
 
       <div class="footer-note">
@@ -177,6 +196,6 @@
   </div>
 
 <script src="spid.i18n.js?v=3"></script>
-<script src="portail.js?v=21"></script>
+<script src="portail.js?v=22"></script>
 </body>
 </html>

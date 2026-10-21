@@ -380,7 +380,7 @@ unlockBtn.addEventListener('click', function() {
       // then refresh the Billboard list so adopted clusters appear.
       return bbPullAndImport()
     })
-    .then(function() { updateBillboardComposer(); assistInit(); calendarReset() })
+    .then(function() { updateBillboardComposer(); assistInit(); calendarReset(); msUpdateDot() })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
@@ -1503,6 +1503,9 @@ function activateService(name) {
   if (target === 'calendar') {
     calendarInit()
   }
+  if (target === 'messages') {
+    msInit()
+  }
 }
 
 function serviceFromHash() {
@@ -2451,3 +2454,127 @@ if (calTodayBtn) calTodayBtn.addEventListener('click', calendarTodayGo)
 // The initial activateService() ran before these DOM refs existed — if the page
 // opened straight on the Calendar tab, render it now.
 if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 8 — MESSAGES (DID-centric)
+//
+// The DID is the address (`to_did`). Immutable blobs — no drafts, no edit.
+// The Portail reads/composes; the body stays readable here (E2E is a next step).
+// ═════════════════════════════════════════════════════════════════════════
+
+var msStatus = document.getElementById('msStatus')
+var msList   = document.getElementById('msList')
+var msTo     = document.getElementById('msTo')
+var msBody   = document.getElementById('msBody')
+var msSendBtn = document.getElementById('msSendBtn')
+var msDot    = document.getElementById('msgDot')
+var _msBox    = 'inbox'
+var _msLoaded = false
+
+function _msScope() { var d = _holderDid(); return d ? { type: 'did', id: d } : null }
+
+function msSetStatus(text, loading) {
+  if (!msStatus) return
+  if (!text) { msStatus.style.display = 'none'; msStatus.textContent = ''; msStatus.classList.remove('loading'); return }
+  msStatus.textContent = text
+  msStatus.style.display = 'block'
+  msStatus.classList.toggle('loading', !!loading)
+}
+function msNote(text) {
+  msList.innerHTML = ''
+  var p = document.createElement('p'); p.className = 'bb-empty'; p.textContent = text
+  msList.appendChild(p)
+}
+
+function msInit() { if (!_msLoaded) msLoad(); msUpdateDot() }
+
+function msLoad() {
+  if (!_unlockedVault) { msNote('Ouvrez votre passport pour voir vos messages.'); return }
+  msSetStatus('Chargement…', true)
+  _assistSignedBody('messages', 'list', { box: _msBox }, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      msSetStatus('')
+      if (!resp.ok || !d || !Array.isArray(d.messages)) {
+        msNote('Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        return
+      }
+      _msLoaded = true
+      msRender(d.messages)
+    })})
+    .catch(function (e) { msSetStatus(''); msNote('Erreur : ' + (e && e.message ? e.message : e)) })
+}
+
+function msRender(rows) {
+  msList.innerHTML = ''
+  if (!rows.length) { msNote(_msBox === 'sent' ? 'Aucun message envoyé.' : 'Boîte vide.'); return }
+  rows.forEach(function (m) {
+    var el = document.createElement('div')
+    el.className = 'ms-msg' + (_msBox === 'inbox' && m.status !== 'read' ? ' unread' : '')
+    var peer = document.createElement('div'); peer.className = 'ms-peer'
+    peer.textContent = (_msBox === 'inbox' ? 'de ' : 'à ') + (_msBox === 'inbox' ? m.from_did : m.to_did)
+    var body = document.createElement('div'); body.className = 'ms-body'; body.textContent = m.body
+    var meta = document.createElement('div'); meta.className = 'ms-meta'
+    var when = document.createElement('span')
+    when.textContent = String(m.created_at || '').replace('T', ' ').slice(0, 16)
+    meta.appendChild(when)
+    if (_msBox === 'inbox' && m.status !== 'read') {
+      var rb = document.createElement('button')
+      rb.type = 'button'; rb.className = 'btn btn-ghost'; rb.textContent = 'Marquer lu'
+      rb.addEventListener('click', function () { msMarkRead(m.id) })
+      meta.appendChild(rb)
+    }
+    el.appendChild(peer); el.appendChild(body); el.appendChild(meta)
+    msList.appendChild(el)
+  })
+}
+
+function msMarkRead(id) {
+  _assistSignedBody('messages', 'read', { id: id }, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function () { msLoad(); msUpdateDot() })
+    .catch(function () {})
+}
+
+function msSend() {
+  var to = (msTo.value || '').trim()
+  var body = (msBody.value || '').trim()
+  if (!/^did:/.test(to)) { msSetStatus('Destinataire : un DID (did:key:z…)'); return }
+  if (!body) { msSetStatus('Message vide.'); return }
+  msSendBtn.disabled = true
+  msSetStatus('Envoi…', true)
+  _assistSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      msSendBtn.disabled = false
+      if (!resp.ok || !d || !d.ok) { msSetStatus('Envoi refusé : ' + ((d && (d.error || d.message)) || resp.status)); return }
+      msBody.value = ''
+      msSetStatus('Envoyé ✓')
+      setTimeout(function () { msSetStatus('') }, 2500)
+      _msBox = 'sent'; msSyncBoxBtns(); msLoad()
+    })})
+    .catch(function (e) { msSendBtn.disabled = false; msSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
+}
+
+function msUpdateDot() {
+  if (!msDot || !_unlockedVault) return
+  _assistSignedBody('messages', 'pending', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text() }).then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      var n = (d && d.pending) || 0
+      msDot.style.display = n > 0 ? 'inline-block' : 'none'
+    }).catch(function () {})
+}
+
+function msSyncBoxBtns() {
+  var i = document.getElementById('msInboxBtn'), s = document.getElementById('msSentBtn')
+  if (i) i.setAttribute('aria-pressed', _msBox === 'inbox' ? 'true' : 'false')
+  if (s) s.setAttribute('aria-pressed', _msBox === 'sent' ? 'true' : 'false')
+}
+
+;(function msWire() {
+  var i = document.getElementById('msInboxBtn'), s = document.getElementById('msSentBtn'), r = document.getElementById('msRefreshBtn')
+  if (i) i.addEventListener('click', function () { _msBox = 'inbox'; msSyncBoxBtns(); msLoad() })
+  if (s) s.addEventListener('click', function () { _msBox = 'sent'; msSyncBoxBtns(); msLoad() })
+  if (r) r.addEventListener('click', function () { msLoad(); msUpdateDot() })
+  if (msSendBtn) msSendBtn.addEventListener('click', msSend)
+})()
