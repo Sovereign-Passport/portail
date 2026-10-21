@@ -175,8 +175,9 @@
 
         <div class="divider">nouveau message</div>
         <div class="field">
-          <label>Destinataire (DID)</label>
-          <input id="msTo" class="did-input" type="text" placeholder="did:key:z…" autocomplete="off">
+          <label>Destinataire(s)</label>
+          <select id="msToSel" class="bb-select" multiple size="4"></select>
+          <input id="msTo" class="did-input" type="text" placeholder="…ou un DID (did:key:z…)" autocomplete="off" style="margin-top:6px;">
         </div>
         <div class="field">
           <label>Message</label>
@@ -196,6 +197,6 @@
   </div>
 
 <script src="spid.i18n.js?v=3"></script>
-<script src="portail.js?v=22"></script>
+<script src="portail.js?v=23"></script>
 </body>
 </html>

@@ -2465,6 +2465,7 @@ if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) ca
 var msStatus = document.getElementById('msStatus')
 var msList   = document.getElementById('msList')
 var msTo     = document.getElementById('msTo')
+var msToSel  = document.getElementById('msToSel')
 var msBody   = document.getElementById('msBody')
 var msSendBtn = document.getElementById('msSendBtn')
 var msDot    = document.getElementById('msgDot')
@@ -2486,7 +2487,24 @@ function msNote(text) {
   msList.appendChild(p)
 }
 
-function msInit() { if (!_msLoaded) msLoad(); msUpdateDot() }
+function msInit() { if (!_msLoaded) msLoad(); msUpdateDot(); msLoadContacts() }
+
+// Recipient list: DIDs reachable by shared membership + the home Vine.
+function msLoadContacts() {
+  if (!msToSel || !_unlockedVault) return
+  _assistSignedBody('messages', 'contacts', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text() }).then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      var list = (d && d.contacts) || []
+      msToSel.innerHTML = ''
+      list.forEach(function (c) {
+        var o = document.createElement('option')
+        o.value = c.did
+        o.textContent = (c.handle || '—') + '  (' + String(c.did).slice(0, 18) + '…)'
+        msToSel.appendChild(o)
+      })
+    }).catch(function () {})
+}
 
 function msLoad() {
   if (!_unlockedVault) { msNote('Ouvrez votre passport pour voir vos messages.'); return }
@@ -2536,23 +2554,37 @@ function msMarkRead(id) {
 }
 
 function msSend() {
-  var to = (msTo.value || '').trim()
   var body = (msBody.value || '').trim()
-  if (!/^did:/.test(to)) { msSetStatus('Destinataire : un DID (did:key:z…)'); return }
+  var recips = msToSel
+    ? Array.prototype.slice.call(msToSel.selectedOptions || []).map(function (o) { return o.value })
+    : []
+  var typed = (msTo.value || '').trim()
+  if (/^did:/.test(typed) && recips.indexOf(typed) === -1) recips.push(typed)
+  if (!recips.length) { msSetStatus('Choisis un destinataire (liste ou DID).'); return }
   if (!body) { msSetStatus('Message vide.'); return }
   msSendBtn.disabled = true
-  msSetStatus('Envoi…', true)
-  _assistSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
-    .then(function (resp) { return resp.text().then(function (t) {
-      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-      msSendBtn.disabled = false
-      if (!resp.ok || !d || !d.ok) { msSetStatus('Envoi refusé : ' + ((d && (d.error || d.message)) || resp.status)); return }
-      msBody.value = ''
-      msSetStatus('Envoyé ✓')
-      setTimeout(function () { msSetStatus('') }, 2500)
-      _msBox = 'sent'; msSyncBoxBtns(); msLoad()
-    })})
-    .catch(function (e) { msSendBtn.disabled = false; msSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
+  msSetStatus('Envoi… ' + recips.length, true)
+
+  var results = []
+  var chain = Promise.resolve()
+  recips.forEach(function (to) {
+    chain = chain.then(function () {
+      return _assistSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
+        .then(function (resp) { return resp.text().then(function (t) {
+          var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+          results.push((resp.ok && d && d.ok) ? '✓' : '✗ ' + ((d && (d.error || d.message)) || resp.status))
+        })})
+        .catch(function (e) { results.push('✗ ' + (e && e.message ? e.message : e)) })
+    })
+  })
+  chain.then(function () {
+    msSendBtn.disabled = false
+    msBody.value = ''
+    _msBox = 'sent'; msSyncBoxBtns()
+    msSetStatus('Envoyé : ' + results.join(' '))
+    setTimeout(function () { msSetStatus('') }, 3000)
+    msLoad()
+  })
 }
 
 function msUpdateDot() {
