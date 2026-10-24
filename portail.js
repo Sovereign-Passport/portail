@@ -2737,6 +2737,96 @@ function relRender(d, C) {
     }
     relGrants.appendChild(el)
   })
+  relLoadMembers()
+}
+
+function relMembers() {
+  var sel = relScope && relScope.value
+  if (!sel) return null
+  var parts = sel.split('|')
+  return { type: parts[0], id: parts.slice(1).join('|') }
+}
+
+function relLoadMembers() {
+  var C = _relContract()
+  var el = document.getElementById('relMembers')
+  if (!C || !el) return
+  if (!_unlockedVault) { relNote(el, 'Ouvrez votre passport.'); return }
+  var target = relMembers()
+  if (!target) { relNote(el, 'Choisis une portée.'); return }
+  relNote(el, 'Chargement…')
+  _assistSignedBody('relation', 'members', {}, target, SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !Array.isArray(d.members)) {
+        relNote(el, 'Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        return
+      }
+      relRenderMembers(el, target, d.members)
+    })})
+    .catch(function (e) { relNote(el, 'Erreur : ' + (e && e.message ? e.message : e)) })
+}
+
+function relRenderMembers(el, target, members) {
+  el.innerHTML = ''
+  if (!members.length) { relNote(el, 'Aucun membre.'); return }
+  members.forEach(function (m) {
+    var row = document.createElement('div'); row.className = 'bb-row'
+    var left = document.createElement('div')
+    var n = document.createElement('div'); n.className = 'bb-title'
+    n.textContent = (m.handle || '—') + ' · ' + String(m.did).slice(0, 18) + '…'
+    var meta = document.createElement('div'); meta.className = 'bb-note'
+    meta.textContent = m.status + (m.is_issuer ? ' · issuer' : '')
+    left.appendChild(n); left.appendChild(meta); row.appendChild(left)
+
+    if (m.status === 'invited') {
+      var approve = document.createElement('button'); approve.type = 'button'
+      approve.className = 'btn btn-gold'; approve.textContent = 'Approuver'
+      approve.addEventListener('click', function () { relDecide(target, m.did, m.status, 'approved') })
+      var refuse = document.createElement('button'); refuse.type = 'button'
+      refuse.className = 'btn btn-ghost'; refuse.textContent = 'Refuser'
+      refuse.addEventListener('click', function () { relDecide(target, m.did, m.status, 'revoked') })
+      row.appendChild(approve); row.appendChild(refuse)
+    }
+    el.appendChild(row)
+  })
+}
+
+function relDecide(target, subject, previous, status) {
+  var C = _relContract()
+  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
+  var actor = _holderDid()
+  if (!actor) { relSetStatus('DID actrice inconnue.'); return }
+  var issued = new Date().toISOString()
+  var payload
+  try {
+    payload = C.canonicalDecisionPayload({
+      scope: target, actor_did: actor, subject_did: subject,
+      status: status, previous_status: previous, issued_at: issued, expires_at: null,
+    })
+  } catch (e) { relSetStatus('Décision invalide.'); return }
+  relSetStatus('Signature…', true)
+  importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+    .then(function (signature) {
+      return _assistSignedBody('relation', 'decision', {
+        decision: {
+          subject_did: subject, status: status, previous_status: previous,
+          issued_at: issued, expires_at: null, signature: signature,
+        },
+      }, target, SPID_BOOTSTRAP_HOST)
+    })
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      relSetStatus('')
+      if (!resp.ok || !d || !d.ok) {
+        relSetStatus('Refusé : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        return
+      }
+      relSetStatus('Décision appliquée ✓')
+      relLoad()
+    })})
+    .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
 function relInvite() {
@@ -2789,4 +2879,5 @@ function relRevoke(kind, id) {
   var r = document.getElementById('relRefreshBtn')
   if (r) r.addEventListener('click', function () { relLoad() })
   if (relInviteBtn) relInviteBtn.addEventListener('click', relInvite)
+  if (relScope) relScope.addEventListener('change', relLoadMembers)
 })()

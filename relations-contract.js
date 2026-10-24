@@ -7,11 +7,11 @@
  * Version is part of the contract. Client and server must refuse a mismatch.
  */
 
-export const RELATIONS_CONTRACT_VERSION = '1.0.0'
+export const RELATIONS_CONTRACT_VERSION = '1.0.1'
 
 export const RELATION_SCOPES  = Object.freeze(['did', 'cluster', 'vine', 'vignard'])
 export const RELATION_TARGET_SCOPES = Object.freeze(['cluster', 'vine', 'vignard'])
-export const RELATION_ACTIONS = Object.freeze(['list', 'invite', 'accept', 'decision', 'revoke'])
+export const RELATION_ACTIONS = Object.freeze(['list', 'members', 'invite', 'accept', 'decision', 'revoke'])
 export const SELF_SCOPED_ACTIONS = Object.freeze(['list', 'accept', 'revoke'])
 export const RELATION_MIN_LEVEL = 'grape'
 
