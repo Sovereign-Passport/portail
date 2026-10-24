@@ -2650,12 +2650,42 @@ function relInit() {
   if (!_relLoaded) relLoad()
 }
 
+function _relSelfCall(action, data, scope, host) {
+  if (!_unlockedVault) throw new Error('locked')
+  var base = String(host || SPID_BOOTSTRAP_HOST).replace(/\/+$/, '')
+  return fetch(base + '/api/switch/nonce')
+    .then(function (r) { if (!r.ok) throw new Error('nonce'); return r.json() })
+    .then(function (n) {
+      return importPrivateKey(_unlockedVault.keys.privateKey).then(function (pk) {
+        return edSign(pk, n.nonce).then(function (signature) {
+          var body = {
+            did: _holderDid(),
+            nonce: n.nonce,
+            self_proof: { nonce: n.nonce, signature: signature },
+            service: 'relation',
+            action: action,
+            data: data || {},
+          }
+          if (scope && scope.type && scope.id) {
+            body.scope_type = scope.type
+            body.scope_id = scope.id
+          }
+          return fetch(base + '/api/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        })
+      })
+    })
+}
+
 function relLoad() {
   if (!_unlockedVault) { relNote(relTies, 'Ouvrez votre passport.'); return }
   var C = _relContract()
   if (!C) { relNote(relTies, 'Contrat Relations indisponible.'); return }
   relSetStatus('Chargement…', true)
-  _assistSignedBody('relation', 'list', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _relSelfCall('list', {}, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       relSetStatus('')
@@ -2755,7 +2785,7 @@ function relLoadMembers() {
   var target = relMembers()
   if (!target) { relNote(el, 'Choisis une portée.'); return }
   relNote(el, 'Chargement…')
-  _assistSignedBody('relation', 'members', {}, target, SPID_BOOTSTRAP_HOST)
+  _relSelfCall('members', {}, target, SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       if (!resp.ok || !d || !Array.isArray(d.members)) {
@@ -2809,7 +2839,7 @@ function relDecide(target, subject, previous, status) {
   importPrivateKey(_unlockedVault.keys.privateKey)
     .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
     .then(function (signature) {
-      return _assistSignedBody('relation', 'decision', {
+      return _relSelfCall('decision', {
         decision: {
           subject_did: subject, status: status, previous_status: previous,
           issued_at: issued, expires_at: null, signature: signature,
@@ -2855,7 +2885,7 @@ function relInvite() {
   }
   relInviteBtn.disabled = true
   relSetStatus('Invitation…', true)
-  _assistSignedBody('relation', 'invite',
+  _relSelfCall('invite',
     { to_did: to, handle: handle, requested: ['handle'] },
     target, SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
@@ -2881,7 +2911,7 @@ function relRevoke(kind, id) {
   var target
   try { target = C.normalizeScope({ type: kind, id: id }) }
   catch (e) { return }
-  _assistSignedBody('relation', 'revoke', { scope: target }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _relSelfCall('revoke', { scope: target }, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function () { relLoad() })
     .catch(function () {})
 }
