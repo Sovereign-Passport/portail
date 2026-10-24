@@ -1468,7 +1468,7 @@ updateBillboardComposer()
 // No secret, DID or authorization is ever accepted from the URL.
 // ═════════════════════════════════════════════════════════════════════════
 
-var SERVICES = ['assist', 'billboard', 'calendar', 'messages']
+var SERVICES = ['assist', 'billboard', 'calendar', 'messages', 'relations']
 var DEFAULT_SERVICE = 'assist'
 
 var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
@@ -1505,6 +1505,9 @@ function activateService(name) {
   }
   if (target === 'messages') {
     msInit()
+  }
+  if (target === 'relations') {
+    relInit()
   }
 }
 
@@ -2609,4 +2612,181 @@ function msSyncBoxBtns() {
   if (s) s.addEventListener('click', function () { _msBox = 'sent'; msSyncBoxBtns(); msLoad() })
   if (r) r.addEventListener('click', function () { msLoad(); msUpdateDot() })
   if (msSendBtn) msSendBtn.addEventListener('click', msSend)
+})()
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 10 — RELATIONS (shared contract v1.0.0)
+// The DID is the actor; the target scope travels in data.scope for self actions.
+// ═════════════════════════════════════════════════════════════════════════
+
+var relStatus  = document.getElementById('relStatus')
+var relTies    = document.getElementById('relTies')
+var relGrants  = document.getElementById('relGrants')
+var relScope   = document.getElementById('relScope')
+var relTo      = document.getElementById('relTo')
+var relHandle  = document.getElementById('relHandle')
+var relInviteBtn = document.getElementById('relInviteBtn')
+var _relLoaded = false
+
+function _relContract() {
+  return (window.SPIDRelations && window.SPIDRelations.contract) || null
+}
+
+function relSetStatus(text, loading) {
+  if (!relStatus) return
+  if (!text) { relStatus.style.display = 'none'; relStatus.textContent = ''; return }
+  relStatus.textContent = text
+  relStatus.style.display = 'block'
+  relStatus.classList.toggle('loading', !!loading)
+}
+
+function relNote(el, text) {
+  el.innerHTML = ''
+  var p = document.createElement('p'); p.className = 'bb-empty'; p.textContent = text
+  el.appendChild(p)
+}
+
+function relInit() {
+  if (!_relLoaded) relLoad()
+}
+
+function relLoad() {
+  if (!_unlockedVault) { relNote(relTies, 'Ouvrez votre passport.'); return }
+  var C = _relContract()
+  if (!C) { relNote(relTies, 'Contrat Relations indisponible.'); return }
+  relSetStatus('Chargement…', true)
+  _assistSignedBody('relation', 'list', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      relSetStatus('')
+      if (!resp.ok || !d || !d.relations) {
+        relNote(relTies, 'Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        return
+      }
+      _relLoaded = true
+      relRender(d, C)
+    })})
+    .catch(function (e) { relSetStatus(''); relNote(relTies, 'Erreur : ' + (e && e.message ? e.message : e)) })
+}
+
+function relRender(d, C) {
+  var rows = []
+  ;(d.relations.vines || []).forEach(function (v) {
+    rows.push({ kind: 'vine', id: v.id, name: v.name, status: v.status, role: v.role })
+  })
+  ;(d.relations.clusters || []).forEach(function (c) {
+    rows.push({ kind: 'cluster', id: c.id, name: c.name, status: c.status,
+                is_issuer: c.is_issuer, cluster_status: c.cluster_status })
+  })
+  ;(d.relations.vignards || []).forEach(function (g) {
+    rows.push({ kind: 'vignard', id: g.id, name: g.name, status: g.status, role: g.role })
+  })
+
+  relTies.innerHTML = ''
+  if (!rows.length) relNote(relTies, 'Aucun lien.')
+  rows.forEach(function (r) {
+    var el = document.createElement('div'); el.className = 'bb-row'
+    var left = document.createElement('div')
+    var n = document.createElement('div'); n.className = 'bb-title'; n.textContent = r.name || r.id
+    var m = document.createElement('div'); m.className = 'bb-note'
+    m.textContent = r.kind + ' · ' + (r.status || '—') +
+      (r.is_issuer ? ' · issuer' : '') +
+      (r.cluster_status === 'revoked' ? ' · cluster révoqué' : '')
+    left.appendChild(n); left.appendChild(m); el.appendChild(left)
+    relTies.appendChild(el)
+  })
+
+  relScope.innerHTML = ''
+  var scopes = rows.filter(function (r) {
+    return r.cluster_status !== 'revoked' &&
+      (r.status === 'approved' || r.status === 'admin' || r.is_issuer)
+  })
+  if (!scopes.length) {
+    var o = document.createElement('option'); o.value = ''; o.textContent = 'Aucune portée disponible'
+    relScope.appendChild(o)
+  } else {
+    scopes.forEach(function (r) {
+      var o = document.createElement('option')
+      o.value = r.kind + '|' + r.id
+      o.textContent = r.kind + ' — ' + (r.name || r.id)
+      relScope.appendChild(o)
+    })
+  }
+
+  relGrants.innerHTML = ''
+  var gs = d.grants || []
+  if (!gs.length) relNote(relGrants, 'Aucun partage.')
+  gs.forEach(function (g) {
+    var el = document.createElement('div'); el.className = 'bb-row'
+    var left = document.createElement('div')
+    var n = document.createElement('div'); n.className = 'bb-title'
+    n.textContent = g.consumer_type + ' — ' + g.consumer_id
+    var m = document.createElement('div'); m.className = 'bb-note'
+    try { m.textContent = JSON.parse(g.types).join(', ') } catch (e) { m.textContent = g.types }
+    left.appendChild(n); left.appendChild(m); el.appendChild(left)
+    if (g.revoked_at) {
+      var b = document.createElement('span'); b.className = 'bb-note'; b.textContent = 'révoqué'
+      el.appendChild(b)
+    } else {
+      var btn = document.createElement('button'); btn.type = 'button'
+      btn.className = 'btn btn-ghost'; btn.textContent = 'Retirer'
+      btn.addEventListener('click', function () {
+        relRevoke(g.consumer_type, g.consumer_id)
+      })
+      el.appendChild(btn)
+    }
+    relGrants.appendChild(el)
+  })
+}
+
+function relInvite() {
+  var C = _relContract()
+  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
+  var sel = relScope.value
+  if (!sel) { relSetStatus('Choisis une portée.'); return }
+  var parts = sel.split('|')
+  var kind = parts[0], id = parts.slice(1).join('|')
+  var target
+  try { target = C.normalizeScope({ type: kind, id: id }) }
+  catch (e) { relSetStatus('Portée invalide.'); return }
+  var to = (relTo.value || '').trim()
+  if (!/^did:/.test(to)) { relSetStatus('DID invitée invalide.'); return }
+  var handle = (relHandle.value || '').trim() || null
+  relInviteBtn.disabled = true
+  relSetStatus('Invitation…', true)
+  _assistSignedBody('relation', 'invite',
+    { to_did: to, handle: handle, requested: ['handle'] },
+    target, SPID_BOOTSTRAP_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      relInviteBtn.disabled = false
+      relSetStatus('')
+      if (!resp.ok || !d || !d.ok) {
+        relSetStatus('Refusé : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        return
+      }
+      relSetStatus('Invité ✓ (' + d.relation + ')')
+      relLoad()
+    })})
+    .catch(function (e) {
+      relInviteBtn.disabled = false
+      relSetStatus('Erreur : ' + (e && e.message ? e.message : e))
+    })
+}
+
+function relRevoke(kind, id) {
+  var C = _relContract()
+  if (!C) return
+  var target
+  try { target = C.normalizeScope({ type: kind, id: id }) }
+  catch (e) { return }
+  _assistSignedBody('relation', 'revoke', { scope: target }, _msScope(), SPID_BOOTSTRAP_HOST)
+    .then(function () { relLoad() })
+    .catch(function () {})
+}
+
+;(function relWire() {
+  var r = document.getElementById('relRefreshBtn')
+  if (r) r.addEventListener('click', function () { relLoad() })
+  if (relInviteBtn) relInviteBtn.addEventListener('click', relInvite)
 })()

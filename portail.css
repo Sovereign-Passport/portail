@@ -494,3 +494,15 @@ html.embed .panel { margin-bottom: 0; }
 .ms-msg .ms-body { font-size: 13.5px; color: var(--text); margin-top: 5px; white-space: pre-wrap; word-break: break-word; }
 .ms-msg .ms-meta { display: flex; align-items: center; gap: 10px; margin-top: 7px; font-size: 10.5px; color: var(--text-dim); }
 .ms-msg .ms-meta .btn { width: auto; padding: 5px 12px; font-size: 10px; }
+
+/* Relations — shared contract UI */
+.bb-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.bb-row:last-child { border-bottom: 0; }
+.bb-title { font-size: 13px; color: var(--text); }
