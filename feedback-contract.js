@@ -8,9 +8,10 @@
  * Private personal markers are a different thing and are not handled here.
  */
 
-export const FEEDBACK_CONTRACT_VERSION = '1.0.0'
+export const FEEDBACK_CONTRACT_VERSION = '1.0.1'
 
 export const FEEDBACK_VALUES = Object.freeze(['positive', 'neutral', 'negative'])
+export const FEEDBACK_ACTIONS = Object.freeze(['submit', 'mine', 'retract', 'summary'])
 export const FEEDBACK_SUBJECTS = Object.freeze(['did', 'cluster', 'vine'])
 
 /** A suspended member may still report an experience. */
