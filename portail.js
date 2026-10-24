@@ -2840,8 +2840,19 @@ function relInvite() {
   try { target = C.normalizeScope({ type: kind, id: id }) }
   catch (e) { relSetStatus('Portée invalide.'); return }
   var to = (relTo.value || '').trim()
-  if (!/^did:/.test(to)) { relSetStatus('DID invitée invalide.'); return }
   var handle = (relHandle.value || '').trim() || null
+  if (!/^did:/.test(to)) {
+    var payload = { scope: target, anchor: SPID_BOOTSTRAP_HOST,
+                    requested: ['handle'], handle: handle }
+    var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    var link = 'https://sovereign-passport.github.io/passport/passport.html#invite=' + b64
+    var wrap = document.getElementById('relLinkWrap')
+    var input = document.getElementById('relLink')
+    if (wrap && input) { input.value = link; wrap.style.display = 'block' }
+    relSetStatus('Lien prêt — envoie-le à l’invité.')
+    return
+  }
   relInviteBtn.disabled = true
   relSetStatus('Invitation…', true)
   _assistSignedBody('relation', 'invite',
@@ -2880,4 +2891,11 @@ function relRevoke(kind, id) {
   if (r) r.addEventListener('click', function () { relLoad() })
   if (relInviteBtn) relInviteBtn.addEventListener('click', relInvite)
   if (relScope) relScope.addEventListener('change', relLoadMembers)
+  var c = document.getElementById('relCopyBtn')
+  if (c) c.addEventListener('click', function () {
+    var link = document.getElementById('relLink')
+    if (!link || !link.value) return
+    try { navigator.clipboard.writeText(link.value); relSetStatus('Lien copié ✓') }
+    catch (e) { link.select(); relSetStatus('Sélectionne et copie le lien.') }
+  })
 })()
