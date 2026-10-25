@@ -355,6 +355,11 @@ html.embed .panel { margin-bottom: 0; }
 .bb-select:focus { border-color: var(--gold); }
 .bb-select option { background: #1a1d22; color: var(--text); }
 
+.rel-share-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.rel-share-actions .btn { width: auto; margin: 0; text-decoration: none; }
+.rel-qr { margin-top: 10px; }
+.rel-qr img { display: block; width: 180px; max-width: 100%; background: #fff; padding: 6px; border-radius: 6px; }
+
 /* Messages — explicit community picker (not a fake select arrow). */
 .ms-picker {
   border: 1px solid rgba(255,255,255,0.14);

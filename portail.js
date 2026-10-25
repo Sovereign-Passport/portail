@@ -2526,7 +2526,7 @@ function msPickerSummary() {
 // Recipient list: DIDs reachable by shared membership + the home Vine.
 function msLoadContacts() {
   if (!msToSel || !_unlockedVault) return
-  _assistSignedBody('messages', 'contacts', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'contacts', {}, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       var groups = (d && d.groups) || []
@@ -2585,13 +2585,16 @@ function msLoadContacts() {
         msToSel.appendChild(section)
       })
       msPickerSummary()
-    }).catch(function () {})
+    }).catch(function () {
+      var summary = document.getElementById('msPickerSummary')
+      if (summary) summary.textContent = 'Contacts indisponibles — réessayer'
+    })
 }
 
 function msLoad() {
   if (!_unlockedVault) { msNote('Ouvrez votre passport pour voir vos messages.'); return }
   msSetStatus('Chargement…', true)
-  _assistSignedBody('messages', 'list', { box: _msBox }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'list', { box: _msBox }, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       msSetStatus('')
@@ -2630,7 +2633,7 @@ function msRender(rows) {
 }
 
 function msMarkRead(id) {
-  _assistSignedBody('messages', 'read', { id: id }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'read', { id: id }, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function () { msLoad(); msUpdateDot() })
     .catch(function () {})
 }
@@ -2654,7 +2657,7 @@ function msSend() {
   var chain = Promise.resolve()
   recips.forEach(function (to) {
     chain = chain.then(function () {
-      return _assistSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
+      return _selfSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
           results.push((resp.ok && d && d.ok) ? '✓' : '✗ ' + ((d && (d.error || d.message)) || resp.status))
@@ -2674,7 +2677,7 @@ function msSend() {
 
 function msUpdateDot() {
   if (!msDot || !_unlockedVault) return
-  _assistSignedBody('messages', 'pending', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'pending', {}, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       var n = (d && d.pending) || 0
@@ -2694,6 +2697,10 @@ function msSyncBoxBtns() {
   if (s) s.addEventListener('click', function () { _msBox = 'sent'; msSyncBoxBtns(); msLoad() })
   if (r) r.addEventListener('click', function () { msLoad(); msUpdateDot() })
   if (msSendBtn) msSendBtn.addEventListener('click', msSend)
+  var picker = document.querySelector('.ms-picker')
+  if (picker) picker.addEventListener('toggle', function () {
+    if (picker.open) msLoadContacts()
+  })
 })()
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -2702,8 +2709,8 @@ function msSyncBoxBtns() {
 // ═════════════════════════════════════════════════════════════════════════
 
 var relStatus  = document.getElementById('relStatus')
-var relTies    = document.getElementById('relTies')
 var relGrants  = document.getElementById('relGrants')
+var _relGrants = []
 var relScope   = document.getElementById('relScope')
 var relTo      = document.getElementById('relTo')
 var relHandle  = document.getElementById('relHandle')
@@ -2732,7 +2739,7 @@ function relInit() {
   if (!_relLoaded) relLoad()
 }
 
-function _relSelfCall(action, data, scope, host) {
+function _selfSignedBody(service, action, data, scope, host) {
   if (!_unlockedVault) throw new Error('locked')
   var base = String(host || SPID_BOOTSTRAP_HOST).replace(/\/+$/, '')
   return fetch(base + '/api/switch/nonce')
@@ -2744,7 +2751,7 @@ function _relSelfCall(action, data, scope, host) {
             did: _holderDid(),
             nonce: n.nonce,
             self_proof: { nonce: n.nonce, signature: signature },
-            service: 'relation',
+            service: service,
             action: action,
             data: data || {},
           }
@@ -2762,23 +2769,27 @@ function _relSelfCall(action, data, scope, host) {
     })
 }
 
+function _relSelfCall(action, data, scope, host) {
+  return _selfSignedBody('relation', action, data, scope, host)
+}
+
 function relLoad() {
-  if (!_unlockedVault) { relNote(relTies, 'Ouvrez votre passport.'); return }
+  if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
   var C = _relContract()
-  if (!C) { relNote(relTies, 'Contrat Relations indisponible.'); return }
+  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
   relSetStatus('Chargement…', true)
   _relSelfCall('list', {}, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       relSetStatus('')
       if (!resp.ok || !d || !d.relations) {
-        relNote(relTies, 'Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
+        relSetStatus('Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
         return
       }
       _relLoaded = true
       relRender(d, C)
     })})
-    .catch(function (e) { relSetStatus(''); relNote(relTies, 'Erreur : ' + (e && e.message ? e.message : e)) })
+    .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
 function relActive(r) {
@@ -2806,19 +2817,6 @@ function relRender(d, C) {
   // in the audit/source data, but are not displayed as active links.
   var activeRows = rows.filter(relActive)
 
-  relTies.innerHTML = ''
-  if (!activeRows.length) relNote(relTies, 'Aucun lien actif.')
-  activeRows.forEach(function (r) {
-    var el = document.createElement('div'); el.className = 'bb-row'
-    var left = document.createElement('div')
-    var n = document.createElement('div'); n.className = 'bb-title'; n.textContent = r.name || r.id
-    var m = document.createElement('div'); m.className = 'bb-note'
-    m.textContent = r.kind + ' · ' + (r.status || '—') +
-      (r.is_issuer ? ' · issuer' : '')
-    left.appendChild(n); left.appendChild(m); el.appendChild(left)
-    relTies.appendChild(el)
-  })
-
   var previousScope = relScope.value
   relScope.innerHTML = ''
   var placeholder = document.createElement('option')
@@ -2843,14 +2841,25 @@ function relRender(d, C) {
     placeholder.selected = true
   }
 
+  _relGrants = d.grants || []
+  relRenderGrants()
+  relLoadMembers()
+}
+
+function relRenderGrants() {
+  if (!relGrants) return
+  var target = relMembers()
   relGrants.innerHTML = ''
-  var gs = d.grants || []
-  if (!gs.length) relNote(relGrants, 'Aucun partage.')
+  if (!target) { relNote(relGrants, 'Choisis une portée.'); return }
+  var gs = _relGrants.filter(function (g) {
+    return g.consumer_type === target.type && g.consumer_id === target.id
+  })
+  if (!gs.length) { relNote(relGrants, 'Aucun partage pour cette portée.'); return }
   gs.forEach(function (g) {
     var el = document.createElement('div'); el.className = 'bb-row'
     var left = document.createElement('div')
     var n = document.createElement('div'); n.className = 'bb-title'
-    n.textContent = g.consumer_type + ' — ' + g.consumer_id
+    n.textContent = 'Partage de données'
     var m = document.createElement('div'); m.className = 'bb-note'
     try { m.textContent = JSON.parse(g.types).join(', ') } catch (e) { m.textContent = g.types }
     left.appendChild(n); left.appendChild(m); el.appendChild(left)
@@ -2867,7 +2876,6 @@ function relRender(d, C) {
     }
     relGrants.appendChild(el)
   })
-  relLoadMembers()
 }
 
 function relMembers() {
@@ -2994,9 +3002,28 @@ function relInvite() {
     var wrap = document.getElementById('relLinkWrap')
     var input = document.getElementById('relLink')
     if (wrap && input) { input.value = link; wrap.style.display = 'block' }
-    relSetStatus('Lien prêt — envoie-le à l’invité.')
+    var email = document.getElementById('relEmail')
+    if (email) {
+      email.href = 'mailto:?subject=' + encodeURIComponent('Invitation SPID') +
+        '&body=' + encodeURIComponent(link)
+    }
+    var sms = document.getElementById('relSms')
+    if (sms) {
+      sms.href = 'sms:?body=' + encodeURIComponent(link)
+    }
+    var qr = document.getElementById('relQr')
+    if (qr) {
+      qr.innerHTML = ''
+      var img = document.createElement('img')
+      img.alt = 'QR invitation'
+      img.src = SPID_BOOTSTRAP_HOST + '/api/qr.svg?text=' + encodeURIComponent(link)
+      qr.appendChild(img)
+    }
+    relSetStatus('Lien et QR prêts — envoie-les à l’invité.')
     return
   }
+  var linkWrap = document.getElementById('relLinkWrap')
+  if (linkWrap) linkWrap.style.display = 'none'
   relInviteBtn.disabled = true
   relSetStatus('Invitation…', true)
   _relSelfCall('invite',
@@ -3034,7 +3061,10 @@ function relRevoke(kind, id) {
   var r = document.getElementById('relRefreshBtn')
   if (r) r.addEventListener('click', function () { relLoad() })
   if (relInviteBtn) relInviteBtn.addEventListener('click', relInvite)
-  if (relScope) relScope.addEventListener('change', relLoadMembers)
+  if (relScope) relScope.addEventListener('change', function () {
+    relRenderGrants()
+    relLoadMembers()
+  })
   var c = document.getElementById('relCopyBtn')
   if (c) c.addEventListener('click', function () {
     var link = document.getElementById('relLink')
