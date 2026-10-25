@@ -579,8 +579,13 @@ function bbRenderClusterSelect(preferredId) {
   // Non-level (public) announcements — always offered in the same select.
   var pub = document.createElement('option')
   pub.value = '__public__'
-  pub.textContent = '— Public (sans cluster) —'
+  pub.textContent = '— Public — réseau entier —'
   bbClusterSelect.appendChild(pub)
+  // The Vine is a community feed: public announcements belong there too.
+  var vine = document.createElement('option')
+  vine.value = '__vine__'
+  vine.textContent = '— Vine — annonces de la communauté —'
+  bbClusterSelect.appendChild(vine)
   // URL preference is UI-only: select it ONLY if it is a real UUID present here.
   var want = (typeof preferredId === 'string' && UUID_RE.test(preferredId)) ? preferredId : null
   var hasWant = false
@@ -588,7 +593,7 @@ function bbRenderClusterSelect(preferredId) {
     if (_bbClusters[w].cluster_id === want) { hasWant = true; break }
   }
   if (hasWant) { bbClusterSelect.value = want; return }
-  if (keep === '__public__') { bbClusterSelect.value = '__public__'; return }
+  if (keep === '__public__' || keep === '__vine__') { bbClusterSelect.value = keep; return }
   var found = false
   for (var i = 0; i < _bbClusters.length; i++) {
     if (_bbClusters[i].cluster_id === keep) { found = true; break }
@@ -647,8 +652,23 @@ function renderBillboardPosts(posts) {
     var meta = document.createElement('div')
     meta.className = 'bb-post-meta'
     var by = document.createElement('span')
-    by.textContent = bbShortDid(p.author_did)
+    by.textContent = p.author_handle || 'Sans pseudo'
     meta.appendChild(by)
+    var copy = document.createElement('button')
+    copy.type = 'button'
+    copy.className = 'btn btn-ghost'
+    copy.style.cssText = 'width:auto;margin:0;padding:2px 7px;font-size:11px;'
+    copy.textContent = '⧉'
+    copy.title = 'Copier la DID de l’auteur'
+    copy.setAttribute('aria-label', 'Copier la DID de l’auteur')
+    copy.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(p.author_did)
+        bbShowStatus('DID copiée ✓')
+        setTimeout(bbHideStatus, 1500)
+      } catch (e) { bbShowStatus('Copie impossible.') }
+    })
+    meta.appendChild(copy)
     if (p.expires_at) {
       var exp = document.createElement('span')
       exp.textContent = 'expires ' + new Date(p.expires_at).toLocaleString()
@@ -956,6 +976,8 @@ function loadPublicBillboard() {
 /** Read the selected Cluster: DID-signed proof + Switchboard cluster/list. */
 function loadClusterBillboard() {
   if (bbClusterSelect.value === '__public__') return loadPublicBillboard()
+  // A Vine feed is the community view of network-wide announcements.
+  if (bbClusterSelect.value === '__vine__') return loadPublicBillboard()
   var cluster = bbSelectedCluster()
   if (!_unlockedVault || !cluster) return Promise.resolve()
 
@@ -2492,20 +2514,77 @@ function msNote(text) {
 
 function msInit() { if (!_msLoaded) msLoad(); msUpdateDot(); msLoadContacts() }
 
+function msPickerSummary() {
+  var summary = document.getElementById('msPickerSummary')
+  if (!summary || !msToSel) return
+  var n = msToSel.querySelectorAll('input[type="checkbox"]:checked:not(.ms-picker-all-box)').length
+  summary.textContent = n
+    ? n + ' destinataire' + (n > 1 ? 's' : '') + ' sélectionné' + (n > 1 ? 's' : '')
+    : 'Les communautés disponibles'
+}
+
 // Recipient list: DIDs reachable by shared membership + the home Vine.
 function msLoadContacts() {
   if (!msToSel || !_unlockedVault) return
   _assistSignedBody('messages', 'contacts', {}, _msScope(), SPID_BOOTSTRAP_HOST)
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      var groups = (d && d.groups) || []
       var list = (d && d.contacts) || []
       msToSel.innerHTML = ''
-      list.forEach(function (c) {
-        var o = document.createElement('option')
-        o.value = c.did
-        o.textContent = (c.handle || '—') + '  (' + String(c.did).slice(0, 18) + '…)'
-        msToSel.appendChild(o)
+      var summary = document.getElementById('msPickerSummary')
+      if (summary) {
+        summary.textContent = groups.length
+          ? 'Les communautés disponibles'
+          : 'Aucune communauté disponible'
+      }
+
+      if (!groups.length && list.length) {
+        groups = [{ type: 'contacts', id: 'contacts', name: 'Contacts', members: list }]
+      }
+      groups.forEach(function (g) {
+        var section = document.createElement('div')
+        section.className = 'ms-picker-section'
+
+        var head = document.createElement('label')
+        head.className = 'ms-picker-group'
+        var all = document.createElement('input')
+        all.type = 'checkbox'
+        all.className = 'ms-picker-all-box'
+        var title = document.createElement('span')
+        title.textContent = (g.type === 'vine' ? 'Vine — ' : g.type === 'cluster' ? 'Cluster — ' : '') + (g.name || g.id)
+        head.appendChild(all)
+        head.appendChild(title)
+        section.appendChild(head)
+
+        var memberBoxes = []
+        g.members.forEach(function (c) {
+          var row = document.createElement('label')
+          row.className = 'ms-picker-row'
+          var cb = document.createElement('input')
+          cb.type = 'checkbox'
+          cb.value = c.did
+          var txt = document.createElement('span')
+          txt.textContent = c.handle || 'Sans pseudo'
+          row.appendChild(cb)
+          row.appendChild(txt)
+          section.appendChild(row)
+          memberBoxes.push(cb)
+          cb.addEventListener('change', function () {
+            var checked = memberBoxes.filter(function (x) { return x.checked }).length
+            all.checked = checked === memberBoxes.length && memberBoxes.length > 0
+            all.indeterminate = checked > 0 && checked < memberBoxes.length
+            msPickerSummary()
+          })
+        })
+        all.addEventListener('change', function () {
+          memberBoxes.forEach(function (cb) { cb.checked = all.checked })
+          all.indeterminate = false
+          msPickerSummary()
+        })
+        msToSel.appendChild(section)
       })
+      msPickerSummary()
     }).catch(function () {})
 }
 
@@ -2559,8 +2638,11 @@ function msMarkRead(id) {
 function msSend() {
   var body = (msBody.value || '').trim()
   var recips = msToSel
-    ? Array.prototype.slice.call(msToSel.selectedOptions || []).map(function (o) { return o.value })
+    ? Array.prototype.slice.call(
+        msToSel.querySelectorAll('input[type="checkbox"]:checked:not(.ms-picker-all-box)')
+      ).map(function (cb) { return cb.value })
     : []
+  recips = recips.filter(function (v, i, a) { return !!v && a.indexOf(v) === i })
   var typed = (msTo.value || '').trim()
   if (/^did:/.test(typed) && recips.indexOf(typed) === -1) recips.push(typed)
   if (!recips.length) { msSetStatus('Choisis un destinataire (liste ou DID).'); return }
@@ -2699,6 +2781,14 @@ function relLoad() {
     .catch(function (e) { relSetStatus(''); relNote(relTies, 'Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
+function relActive(r) {
+  if (r.kind === 'cluster') {
+    return r.cluster_status !== 'revoked' &&
+      r.status !== 'revoked' && r.status !== 'removed' && r.status !== 'left'
+  }
+  return r.status !== 'revoked' && r.status !== 'left'
+}
+
 function relRender(d, C) {
   var rows = []
   ;(d.relations.vines || []).forEach(function (v) {
@@ -2712,35 +2802,45 @@ function relRender(d, C) {
     rows.push({ kind: 'vignard', id: g.id, name: g.name, status: g.status, role: g.role })
   })
 
+  // "Mes liens" = active relations only. Revoked/deleted/left links are kept
+  // in the audit/source data, but are not displayed as active links.
+  var activeRows = rows.filter(relActive)
+
   relTies.innerHTML = ''
-  if (!rows.length) relNote(relTies, 'Aucun lien.')
-  rows.forEach(function (r) {
+  if (!activeRows.length) relNote(relTies, 'Aucun lien actif.')
+  activeRows.forEach(function (r) {
     var el = document.createElement('div'); el.className = 'bb-row'
     var left = document.createElement('div')
     var n = document.createElement('div'); n.className = 'bb-title'; n.textContent = r.name || r.id
     var m = document.createElement('div'); m.className = 'bb-note'
     m.textContent = r.kind + ' · ' + (r.status || '—') +
-      (r.is_issuer ? ' · issuer' : '') +
-      (r.cluster_status === 'revoked' ? ' · cluster révoqué' : '')
+      (r.is_issuer ? ' · issuer' : '')
     left.appendChild(n); left.appendChild(m); el.appendChild(left)
     relTies.appendChild(el)
   })
 
+  var previousScope = relScope.value
   relScope.innerHTML = ''
-  var scopes = rows.filter(function (r) {
-    return r.cluster_status !== 'revoked' &&
-      (r.status === 'approved' || r.status === 'admin' || r.is_issuer)
+  var placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = 'Les communautés disponibles'
+  placeholder.disabled = true
+  relScope.appendChild(placeholder)
+  var scopes = activeRows.filter(function (r) {
+    return r.status === 'approved' || r.status === 'admin' || r.is_issuer
   })
-  if (!scopes.length) {
-    var o = document.createElement('option'); o.value = ''; o.textContent = 'Aucune portée disponible'
+  scopes.forEach(function (r) {
+    var o = document.createElement('option')
+    o.value = r.kind + '|' + r.id
+    o.textContent = (r.name || r.id) + ' · ' + r.kind
     relScope.appendChild(o)
-  } else {
-    scopes.forEach(function (r) {
-      var o = document.createElement('option')
-      o.value = r.kind + '|' + r.id
-      o.textContent = r.kind + ' — ' + (r.name || r.id)
-      relScope.appendChild(o)
-    })
+  })
+  if (previousScope) relScope.value = previousScope
+  if (!scopes.length) {
+    placeholder.textContent = 'Aucune communauté disponible'
+    placeholder.selected = true
+  } else if (!relScope.value) {
+    placeholder.selected = true
   }
 
   relGrants.innerHTML = ''
@@ -2804,10 +2904,24 @@ function relRenderMembers(el, target, members) {
     var row = document.createElement('div'); row.className = 'bb-row'
     var left = document.createElement('div')
     var n = document.createElement('div'); n.className = 'bb-title'
-    n.textContent = (m.handle || '—') + ' · ' + String(m.did).slice(0, 18) + '…'
+    n.textContent = m.handle || 'Sans pseudo'
     var meta = document.createElement('div'); meta.className = 'bb-note'
     meta.textContent = m.status + (m.is_issuer ? ' · issuer' : '')
     left.appendChild(n); left.appendChild(meta); row.appendChild(left)
+
+    var copy = document.createElement('button')
+    copy.type = 'button'; copy.className = 'btn btn-ghost'
+    copy.textContent = '⧉'
+    copy.title = 'Copier la DID complète'
+    copy.setAttribute('aria-label', 'Copier la DID complète')
+    copy.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(m.did)
+        relSetStatus('DID copiée ✓')
+        setTimeout(function () { relSetStatus('') }, 1500)
+      } catch (e) { relSetStatus('Copie impossible.') }
+    })
+    row.appendChild(copy)
 
     if (m.status === 'invited') {
       var approve = document.createElement('button'); approve.type = 'button'
