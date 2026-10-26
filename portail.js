@@ -1917,7 +1917,7 @@ function assistSendBillboardAction(payload) {
 function assistReadAllCalendar() {
   if (!_unlockedVault) return Promise.resolve([])
   var jobs = _calScopes().map(function (sc) {
-    return _assistSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
+    return _selfSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
       .then(function (resp) { return resp.text().then(function (t) {
         var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
         return ((d && d.events) || []).map(function (e) {
@@ -1963,7 +1963,7 @@ function assistCalendarUpdate(a) {
     }
     if (d.ends_at)  body.ends_at   = d.ends_at
     if (d.location) body.data      = { location: d.location }
-    return _assistSignedBody('calendar', 'update', body,
+    return _selfSignedBody('calendar', 'update', body,
         { type: found._scopeType, id: found._scopeId }, found._host)
       .then(function (resp) { return resp.text().then(function (t) {
         var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
@@ -2282,7 +2282,12 @@ function _hhmm(iso) {
   return m ? (m[1] + ':' + m[2]) : ''
 }
 
-function calendarReset() { _calLoaded = false; _calEvents = [] }
+function calendarReset() {
+  _calLoaded = false
+  _calEvents = []
+  _calAnchor = null
+  _calSel = null
+}
 
 function calendarInit() {
   if (!calMonthEl) return
@@ -2303,7 +2308,7 @@ function calendarLoad() {
   _calLoading = true
   calendarEmpty('Chargement…')
   var calls = scopes.map(function (sc) {
-    return _assistSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
+    return _selfSignedBody('calendar', 'list', {}, { type: sc.type, id: sc.id }, sc.host)
       .then(function (resp) { return resp.text().then(function (t) {
         var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
         return { scope: sc, ok: resp.ok, status: resp.status, data: d }
@@ -2846,6 +2851,23 @@ function relRender(d, C) {
   relLoadMembers()
 }
 
+function relGrantLabel(raw) {
+  var types = null
+  try { types = JSON.parse(raw) } catch (e) { types = null }
+  if (!Array.isArray(types) || !types.length) return 'Minimal (DID)'
+  var labels = { handle: 'Pseudo', icons: 'Icônes', feedback: 'Feedback', relations: 'Relations' }
+  var names = types.map(function (t) {
+    if (labels[t]) return labels[t]
+    if (t.indexOf(':') !== -1) {
+      var p = t.split(':')
+      return p[0].charAt(0).toUpperCase() + p[0].slice(1) + ' · ' + p[1]
+    }
+    return t
+  })
+  if (types.length === 1 && types[0] === 'handle') return 'Minimal (DID, Pseudo)'
+  return 'DID · ' + names.join(' · ')
+}
+
 function relRenderGrants() {
   if (!relGrants) return
   var target = relMembers()
@@ -2861,7 +2883,7 @@ function relRenderGrants() {
     var n = document.createElement('div'); n.className = 'bb-title'
     n.textContent = 'Partage de données'
     var m = document.createElement('div'); m.className = 'bb-note'
-    try { m.textContent = JSON.parse(g.types).join(', ') } catch (e) { m.textContent = g.types }
+    m.textContent = relGrantLabel(g.types)
     left.appendChild(n); left.appendChild(m); el.appendChild(left)
     if (g.revoked_at) {
       var b = document.createElement('span'); b.className = 'bb-note'; b.textContent = 'révoqué'
