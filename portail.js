@@ -367,7 +367,6 @@ function showLnaGate() {
   _lnaPending = true
   var el = document.getElementById('lnaField')
   if (el) el.style.display = 'block'
-  showMsg('info', 'Autorisez l’accès au serveur SPID pour obtenir les services demandés.')
 }
 
 // ── Step 2 — unlock, then the vine answers with YOUR doors ───────────────
@@ -3059,7 +3058,9 @@ function relInvite() {
   var to = (relTo.value || '').trim()
   var handle = (relHandle.value || '').trim() || null
   if (!/^did:/.test(to)) {
-    var payload = { scope: target, anchor: SPID_BOOTSTRAP_HOST,
+    var opt = relScope.options[relScope.selectedIndex]
+    var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : null
+    var payload = { scope: target, name: targetName, anchor: SPID_BOOTSTRAP_HOST,
                     requested: ['handle'], handle: handle }
     var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
