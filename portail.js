@@ -220,7 +220,10 @@ function requestAccess(unlockedVault) {
   var host      = switchboardHostFor(credential)
 
   return importPrivateKey(unlockedVault.keys.privateKey).then(function(privateKey) {
-    return fetch(host + '/api/switch/nonce')
+    return fetch(host + '/api/switch/nonce', {
+      mode: 'cors', credentials: 'omit', cache: 'no-store',
+      targetAddressSpace: 'local',
+    })
       .then(function(nonceResp) {
         if (!nonceResp.ok) throw new Error('Could not reach the switchboard for a nonce.')
         return nonceResp.json()
@@ -252,6 +255,10 @@ function requestAccess(unlockedVault) {
       .then(function(body) {
         return fetch(host + '/api/switch', {
           method:  'POST',
+          mode:    'cors',
+          credentials: 'omit',
+          cache:   'no-store',
+          targetAddressSpace: 'local',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(body),
         })
@@ -275,6 +282,7 @@ var msgBox         = document.getElementById('msgBox')
 
 var _storedPayload = null
 var _unlockedVault = null
+var _lnaPending    = false
 // Derived AES-GCM vault key — held ONLY in memory to re-decrypt the latest
 // IndexedDB payload on a soft refresh. Never persisted anywhere.
 var _vaultKey      = null
@@ -331,6 +339,37 @@ loadStoredVault()
     pwInput.focus()
   })
 
+function handleAccessResponse(resp) {
+  if (!resp) return Promise.resolve()
+  return resp.text().then(function(responseText) {
+    var parsed = null
+    try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
+    if (!resp.ok) {
+      var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + resp.status)
+      showMsg('error', 'Access denied: ' + reason)
+      return
+    }
+    clearMsg()
+    showDoors(parsed.level, parsed.services)
+  })
+}
+
+function afterAccess() {
+  return bbPullAndImport().then(function() {
+    updateBillboardComposer()
+    assistInit()
+    calendarReset()
+    msUpdateDot()
+  })
+}
+
+function showLnaGate() {
+  _lnaPending = true
+  var el = document.getElementById('lnaField')
+  if (el) el.style.display = 'block'
+  showMsg('info', 'Autorisez l’accès au serveur SPID pour obtenir les services demandés.')
+}
+
 // ── Step 2 — unlock, then the vine answers with YOUR doors ───────────────
 unlockBtn.addEventListener('click', function() {
   clearMsg()
@@ -356,31 +395,17 @@ unlockBtn.addEventListener('click', function() {
       } catch (e) {}
       updateBillboardComposer()
       unlockField.style.display = 'none'
-      showMsg('info', 'Passport unlocked. Asking your vine…')
-      return requestAccess(_unlockedVault)
+      showLnaGate()
+      return null
     })
     .then(function(resp) {
-      if (!resp) return
-      return resp.text().then(function(responseText) {
-        var parsed = null
-        try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
-
-        if (!resp.ok) {
-          var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + resp.status)
-          showMsg('error', 'Access denied: ' + reason)
-          return
-        }
-
-        clearMsg()
-        showDoors(parsed.level, parsed.services)
-      })
+      if (_lnaPending || !resp) return
+      return handleAccessResponse(resp)
     })
     .then(function() {
-      // Receive owned + joined clusters from the Switchboard (self-issued only),
-      // then refresh the Billboard list so adopted clusters appear.
-      return bbPullAndImport()
+      if (_lnaPending) return
+      return afterAccess()
     })
-    .then(function() { updateBillboardComposer(); assistInit(); calendarReset(); msUpdateDot() })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
         showMsg('error', 'Wrong password. Try again.')
@@ -392,6 +417,24 @@ unlockBtn.addEventListener('click', function() {
     .then(function() {
       unlockBtn.disabled = false
       unlockBtnLabel.textContent = 'Unlock →'
+    })
+})
+
+var lnaAllowBtn = document.getElementById('lnaAllowBtn')
+if (lnaAllowBtn) lnaAllowBtn.addEventListener('click', function() {
+  if (!_unlockedVault || !_vaultKey) return
+  var gate = document.getElementById('lnaField')
+  if (gate) gate.style.display = 'none'
+  _lnaPending = false
+  showMsg('info', 'Demande d’accès au réseau local…')
+  requestAccess(_unlockedVault)
+    .then(function(resp) {
+      if (!resp) return
+      return handleAccessResponse(resp).then(function() { return afterAccess() })
+    })
+    .catch(function(e) {
+      showMsg('error', 'Demande réseau échouée : ' + (e && e.message ? e.message : e))
+      showLnaGate()
     })
 })
 
