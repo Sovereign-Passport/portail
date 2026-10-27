@@ -1,0 +1,8 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "/opt/blindspot/passport/app/axismundi.md",
+    "/opt/blindspot/spid-js/docs/ARCHITECTURE.md",
+    "/opt/blindspot/spid-js/README.md"
+  ]
+}
