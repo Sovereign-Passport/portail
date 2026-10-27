@@ -4,5 +4,8 @@
     "/opt/blindspot/passport/app/axismundi.md",
     "/opt/blindspot/spid-js/docs/ARCHITECTURE.md",
     "/opt/blindspot/spid-js/README.md"
+  ],
+  "plugins": [
+    "/opt/blindspot/.opencode/plugins"
   ]
 }
