@@ -260,6 +260,17 @@ function requestAccess(unlockedVault) {
             if (scope) { body.scope_type = scope.type; body.scope_id = scope.id }
             return body
           })
+        } else if (holderDid) {
+          // Bare Passport: the DID signs the nonce itself and asks for its
+          // OWN scope. No credential, no Vine, same DID + proof + scope flow.
+          bodyPromise = edSign(privateKey, nonce).then(function(signature) {
+            return {
+              did: holderDid, nonce: nonce,
+              self_proof: { nonce: nonce, signature: signature },
+              scope_type: 'did', scope_id: holderDid,
+              service: 'spid', action: 'access', data: {},
+            }
+          })
         } else {
           bodyPromise = Promise.resolve(
             { service: 'spid', action: 'access', data: {} }
@@ -299,6 +310,8 @@ var msgBox         = document.getElementById('msgBox')
 var _storedPayload = null
 var _unlockedVault = null
 var _lnaPending    = false
+// Contextual rights confirmed by the Switchboard for the current access.
+var _accessRights  = null
 // Derived AES-GCM vault key — held ONLY in memory to re-decrypt the latest
 // IndexedDB payload on a soft refresh. Never persisted anywhere.
 var _vaultKey      = null
@@ -312,27 +325,19 @@ function clearMsg() {
   msgBox.textContent = ''
 }
 
-function showDoors(level, services) {
-  // "your doors" is intentionally hidden on the Assist page (kept in the DOM).
+// The Switchboard returns contextual rights, not a service catalog.
+// Assist owns the catalog; this hidden block only keeps the confirmed scope
+// visible for debugging without presenting a second source of truth.
+function showDoors(rights) {
   doorsDivider.style.display = 'none'
   doorsField.style.display   = 'none'
   doorsList.innerHTML        = ''
-
-  if (!services || services.length === 0) {
-    var empty = document.createElement('div')
-    empty.className = 'door-empty'
-    empty.textContent = 'No doors open for this passport yet. Ask your vine for an invitation.'
-    doorsList.appendChild(empty)
-    return
-  }
-
-  services.forEach(function(svc) {
-    var a = document.createElement('a')
-    a.className   = 'door-link'
-    a.href        = svc.url
-    a.textContent = svc.label
-    doorsList.appendChild(a)
-  })
+  if (!rights || rights.relation === 'guest') return
+  var note = document.createElement('div')
+  note.className = 'door-empty'
+  note.textContent = (rights.scope ? rights.scope.type + ': ' + rights.scope.id : '') +
+                     ' — ' + rights.relation
+  doorsList.appendChild(note)
 }
 
 // ── Step 1 — detect a stored passport on this device ─────────────────────
@@ -361,12 +366,14 @@ function handleAccessResponse(resp) {
     var parsed = null
     try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
     if (!resp.ok) {
+      _accessRights = null
       var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + resp.status)
       showMsg('error', 'Access denied: ' + reason)
       return
     }
     clearMsg()
-    showDoors(parsed.level, parsed.services)
+    _accessRights = parsed.rights || null
+    showDoors(_accessRights)
   })
 }
 
@@ -1758,11 +1765,19 @@ function _assistCluster() {
   return (_bbClusters && _bbClusters.length) ? _bbClusters[0] : null
 }
 function _assistHost() {
-  var cl = _assistCluster()
-  if (cl && cl.endpoint) return cl.endpoint
+  // Same Switchboard as the access discovery: derived from the credential's
+  // issuer, never from an unrelated Cluster selection.
   return switchboardHostFor(_assistCredential())
 }
 function _assistScope() {
+  // Same scope as the access discovery (confirmed by the Switchboard).
+  if (_accessRights && _accessRights.scope) return _accessRights.scope
+  // Fallbacks are only for a Passport whose credential does not carry a
+  // scope (legacy/owned only); the Switchboard still verifies the relation.
+  var scoped = accessScopeFor(_assistCredential())
+  if (scoped) return scoped
+  var did = _holderDid()
+  if (did) return { type: 'did', id: did }
   var cl = _assistCluster()
   return cl ? { type: 'cluster', id: cl.cluster_id } : null
 }
@@ -1777,8 +1792,17 @@ function _assistSignedBody(service, action, data, scope, hostOverride) {
     .then(function (n) {
       var body = { service: service, action: action, data: data || {} }
       if (sc) { body.scope_type = sc.type; body.scope_id = sc.id }
-      if (!cred) return body
+      if (!_unlockedVault) return body
       return importPrivateKey(_unlockedVault.keys.privateKey).then(function (pk) {
+        if (!cred) {
+          // Bare Passport: sign the nonce with its own key (self-proof).
+          return edSign(pk, n.nonce).then(function (signature) {
+            body.did = _unlockedVault.identity.id
+            body.nonce = n.nonce
+            body.self_proof = { nonce: n.nonce, signature: signature }
+            return body
+          })
+        }
         return buildPresentation({
           credential: cred, revealKeys: [],
           holderDid: _unlockedVault.identity.id, holderPrivateKey: pk,
@@ -1801,6 +1825,17 @@ function assistRenderPlan(plan) {
   var head = document.createElement('p'); head.className = 'cred-type'
   head.textContent = 'Plan proposé (' + (plan.status || '?') + ')'
   assistPlanBox.appendChild(head)
+
+  // Capabilities come from Assist's own catalog, already filtered by the
+  // contextual rights confirmed by the Switchboard.
+  var caps = plan.capabilities || []
+  if (caps.length) {
+    var capLine = document.createElement('p'); capLine.className = 'bb-note'
+    capLine.textContent = 'Services disponibles : ' + caps.map(function (c) {
+      return (c.label || c.service) + ' (' + (c.actions || []).join(', ') + ')'
+    }).join(' · ')
+    assistPlanBox.appendChild(capLine)
+  }
 
   if (plan.summary) assistLine(plan.summary)
   if (plan.question) {
