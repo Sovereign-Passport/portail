@@ -211,6 +211,19 @@ function switchboardHostFor(credential) {
   return SPID_BOOTSTRAP_HOST
 }
 
+function accessScopeFor(credential) {
+  if (!credential) return null
+  if (credential.scope === 'cluster' && credential.cluster_id) {
+    return { type: 'cluster', id: credential.cluster_id }
+  }
+  if (credential.scope === 'vignard' && credential.vignard_id) {
+    return { type: 'vignard', id: credential.vignard_id }
+  }
+  if (credential.vine_id) return { type: 'vine', id: credential.vine_id }
+  if (credential.node_id) return { type: 'vine', id: credential.node_id }
+  return null
+}
+
 function requestAccess(unlockedVault) {
   var credential = (unlockedVault.credentials || []).filter(function(c) {
     return c.type === 'MembershipCredential' && !c.revoked
@@ -218,6 +231,7 @@ function requestAccess(unlockedVault) {
 
   var holderDid = unlockedVault.identity.id
   var host      = switchboardHostFor(credential)
+  var scope      = accessScopeFor(credential)
 
   return importPrivateKey(unlockedVault.keys.privateKey).then(function(privateKey) {
     return fetch(host + '/api/switch/nonce', {
@@ -241,8 +255,10 @@ function requestAccess(unlockedVault) {
             verifierDid:      credential.issuer_did || DEFAULT_VINE_DID,
             nonce:            nonce,
           }).then(function(presentation) {
-            return { did: holderDid, presentation: presentation, nonce: nonce,
-                     service: 'spid', action: 'access', data: {} }
+            var body = { did: holderDid, presentation: presentation, nonce: nonce,
+                         service: 'spid', action: 'access', data: {} }
+            if (scope) { body.scope_type = scope.type; body.scope_id = scope.id }
+            return body
           })
         } else {
           bodyPromise = Promise.resolve(
