@@ -1879,8 +1879,25 @@ function _assistTargetForText(text) {
     var name = _assistNorm(c.name || c.label || '')
     if (name.length < 3) return
     var id = _assistNorm(c.cluster_id)
-    if (n.indexOf(name) === -1 && n.indexOf(id) === -1) return
-    if (!best || name.length > best.len) best = { cluster: c, len: name.length }
+    var score = 0
+    var exact = false
+    if (n.indexOf(name) !== -1) {
+      score = name.length
+      exact = true
+    } else if (id && n.indexOf(id) !== -1) {
+      score = 1000
+      exact = true
+    } else {
+      // Match distinctive words: "Mandalin" selects
+      // "Sailing-Mexico.com : Mandalin Holbox" without requiring the full name.
+      name.split(' ').forEach(function (word) {
+        if (word.length >= 4 && n.indexOf(word) !== -1) score += word.length
+      })
+    }
+    if (!score) return
+    if (!best || score > best.score || (score === best.score && exact && !best.exact)) {
+      best = { cluster: c, score: score, exact: exact }
+    }
   })
   if (!best) return null
   var c = best.cluster
