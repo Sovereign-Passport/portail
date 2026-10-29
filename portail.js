@@ -224,7 +224,43 @@ function accessScopeFor(credential) {
   return null
 }
 
-function requestAccess(unlockedVault) {
+/** Literal local/private host only. A public DNS name is left to the browser. */
+function isLocalTarget(host) {
+  try {
+    var h = new URL(host).hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
+    if (h.length > 6 && h.slice(-6) === '.local') return true
+    if (/^10\./.test(h) || /^192\.168\./.test(h)) return true
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true
+    if (h.indexOf(':') !== -1 &&
+        (h.indexOf('fe80:') === 0 || /^f[cd][0-9a-f]{2}:/.test(h))) return true
+  } catch (e) {}
+  return false
+}
+
+/**
+ * CORS options for the Switchboard. The LNA hint is only sent for literal
+ * local targets, or when the user explicitly retries through the LNA button.
+ * A public hostname may resolve locally (LAN) or publicly (5G): let the
+ * browser decide in that case.
+ */
+function switchFetchOptions(host, forceLocal) {
+  var opts = { mode: 'cors', credentials: 'omit', cache: 'no-store' }
+  if (forceLocal || isLocalTarget(host)) opts.targetAddressSpace = 'local'
+  return opts
+}
+
+/** TypeError/Failed-to-fetch is the portable signal for a possible LNA block. */
+function isLnaLikely(err) {
+  if (!err) return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  var msg = String(err.message || err)
+  return err.name === 'TypeError' ||
+    /failed to fetch|networkerror|load failed|local network|private network/i.test(msg)
+}
+
+function requestAccess(unlockedVault, options) {
+  var forceLocal = !!(options && options.forceLocal)
   var credential = (unlockedVault.credentials || []).filter(function(c) {
     return c.type === 'MembershipCredential' && !c.revoked
   })[0]
@@ -234,10 +270,7 @@ function requestAccess(unlockedVault) {
   var scope      = accessScopeFor(credential)
 
   return importPrivateKey(unlockedVault.keys.privateKey).then(function(privateKey) {
-    return fetch(host + '/api/switch/nonce', {
-      mode: 'cors', credentials: 'omit', cache: 'no-store',
-      targetAddressSpace: 'local',
-    })
+    return fetch(host + '/api/switch/nonce', switchFetchOptions(host, forceLocal))
       .then(function(nonceResp) {
         if (!nonceResp.ok) throw new Error('Could not reach the switchboard for a nonce.')
         return nonceResp.json()
@@ -280,15 +313,11 @@ function requestAccess(unlockedVault) {
         return bodyPromise
       })
       .then(function(body) {
-        return fetch(host + '/api/switch', {
-          method:  'POST',
-          mode:    'cors',
-          credentials: 'omit',
-          cache:   'no-store',
-          targetAddressSpace: 'local',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(body),
-        })
+        var opts = switchFetchOptions(host, forceLocal)
+        opts.method = 'POST'
+        opts.headers = { 'Content-Type': 'application/json' }
+        opts.body = JSON.stringify(body)
+        return fetch(host + '/api/switch', opts)
       })
   })
 }
@@ -361,19 +390,22 @@ loadStoredVault()
   })
 
 function handleAccessResponse(resp) {
-  if (!resp) return Promise.resolve()
+  if (!resp) return Promise.resolve(false)
   return resp.text().then(function(responseText) {
     var parsed = null
     try { parsed = JSON.parse(responseText) } catch (err) { parsed = null }
     if (!resp.ok) {
       _accessRights = null
+      assistSetReady(false)
       var reason = (parsed && (parsed.message || parsed.error)) || ('HTTP ' + resp.status)
       showMsg('error', 'Access denied: ' + reason)
-      return
+      return false
     }
     clearMsg()
     _accessRights = parsed.rights || null
+    assistSetReady(_rightsAllowAssist(_accessRights))
     showDoors(_accessRights)
+    return true
   })
 }
 
@@ -390,6 +422,46 @@ function showLnaGate() {
   _lnaPending = true
   var el = document.getElementById('lnaField')
   if (el) el.style.display = 'block'
+}
+
+function hideLnaGate() {
+  _lnaPending = false
+  var el = document.getElementById('lnaField')
+  if (el) el.style.display = 'none'
+}
+
+/**
+ * Discover the DID rights. Assist is already visible; protected actions stay
+ * disabled until this succeeds. The LNA gate is only a fallback after a
+ * network/LNA failure, never a prerequisite for showing Assist.
+ */
+function connectSwitchboard(forceLocal) {
+  if (!_unlockedVault) return Promise.resolve(false)
+  assistSetStatus('Connexion au Switchboard…', true)
+  return requestAccess(_unlockedVault, { forceLocal: !!forceLocal })
+    .then(function(resp) { return handleAccessResponse(resp) })
+    .then(function(ok) {
+      if (!ok) { assistSetStatus(''); return false }
+      hideLnaGate()
+      assistSetStatus('')
+      return afterAccess().then(function() { return true }).catch(function(err) {
+        console.warn('[Access] refresh after access failed:', err)
+        return true
+      })
+    })
+    .catch(function(err) {
+      _accessRights = null
+      assistSetReady(false)
+      assistSetStatus('')
+      if (isLnaLikely(err)) {
+        showLnaGate()
+        showMsg('info', 'Connexion locale requise. Autorisez l’accès au serveur SPID.')
+      } else {
+        showMsg('error', 'Connexion au Switchboard échouée : ' +
+          (err && err.message ? err.message : err))
+      }
+      return false
+    })
 }
 
 // ── Step 2 — unlock, then the vine answers with YOUR doors ───────────────
@@ -417,16 +489,14 @@ unlockBtn.addEventListener('click', function() {
       } catch (e) {}
       updateBillboardComposer()
       unlockField.style.display = 'none'
-      showLnaGate()
+      hideLnaGate()
+      _accessRights = null
+      // The conversation is visible immediately after unlock; only protected
+      // actions wait for the Switchboard's contextual rights.
+      assistInit()
+      assistSetReady(false)
+      connectSwitchboard(false)
       return null
-    })
-    .then(function(resp) {
-      if (_lnaPending || !resp) return
-      return handleAccessResponse(resp)
-    })
-    .then(function() {
-      if (_lnaPending) return
-      return afterAccess()
     })
     .catch(function(e) {
       if (e.code === 'WRONG_PASSWORD') {
@@ -445,19 +515,8 @@ unlockBtn.addEventListener('click', function() {
 var lnaAllowBtn = document.getElementById('lnaAllowBtn')
 if (lnaAllowBtn) lnaAllowBtn.addEventListener('click', function() {
   if (!_unlockedVault || !_vaultKey) return
-  var gate = document.getElementById('lnaField')
-  if (gate) gate.style.display = 'none'
-  _lnaPending = false
-  showMsg('info', 'Demande d’accès au réseau local…')
-  requestAccess(_unlockedVault)
-    .then(function(resp) {
-      if (!resp) return
-      return handleAccessResponse(resp).then(function() { return afterAccess() })
-    })
-    .catch(function(e) {
-      showMsg('error', 'Demande réseau échouée : ' + (e && e.message ? e.message : e))
-      showLnaGate()
-    })
+  hideLnaGate()
+  connectSwitchboard(true)
 })
 
 pwInput.addEventListener('keydown', function(e) {
@@ -1723,9 +1782,15 @@ var assistPlanBox = document.getElementById('assistPlanBox')
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
 
+/** Only these contextual relations can use the Assist planner. */
+function _rightsAllowAssist(rights) {
+  return !!(rights && ['self', 'member', 'admin'].indexOf(rights.relation) !== -1)
+}
+
 function assistInit() {
   assistDivider.style.display = 'flex'
   assistField.style.display   = 'block'
+  assistSetReady(_rightsAllowAssist(_accessRights))
 }
 
 function assistLine(text) {
@@ -1747,11 +1812,23 @@ function assistSetStatus(text, loading) {
 }
 
 // Busy = a plan/execution is in flight: block duplicate submits, show a spinner.
+// Access-ready = the Switchboard confirmed contextual rights for Assist.
 var _assistBusy = false
+var _assistAccessReady = false
+
+function _assistSyncButtons() {
+  if (assistSendBtn) assistSendBtn.disabled = _assistBusy || !_assistAccessReady
+  if (assistRecBtn)  assistRecBtn.disabled  = _assistBusy || !_assistAccessReady
+}
+
+function assistSetReady(ready) {
+  _assistAccessReady = !!ready
+  _assistSyncButtons()
+}
+
 function assistSetBusy(on) {
   _assistBusy = !!on
-  if (assistSendBtn) assistSendBtn.disabled = _assistBusy
-  if (assistRecBtn)  assistRecBtn.disabled  = _assistBusy
+  _assistSyncButtons()
   if (!_assistBusy) assistSetStatus('')
 }
 
@@ -1869,6 +1946,10 @@ function assistRenderPlan(plan) {
 }
 
 function assistConfirm(plan) {
+  if (!_assistAccessReady) {
+    assistLine('Droits non confirmés pour Assist — action non exécutée.')
+    return
+  }
   var actions = plan.actions || []
   if (!actions.length) return
   assistSetBusy(true)
@@ -2116,7 +2197,7 @@ function assistBillboardPostOp(a) {
 }
 
 function assistSubmit(text) {
-  if (!text || _assistBusy) return
+  if (!text || _assistBusy || !_assistAccessReady) return
   assistSetBusy(true)
   assistSetStatus('Planification…', true)
   _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope(), lang: _uiLang() })
@@ -2149,6 +2230,10 @@ function assistSubmit(text) {
 
 function assistSend() {
   if (_assistBusy) return
+  if (!_assistAccessReady) {
+    assistLine('Droits non confirmés pour Assist — attendez la connexion au Switchboard.')
+    return
+  }
   var text = (assistInput.value || '').trim()
   if (!text) return
   assistInput.value = ''
@@ -2222,6 +2307,10 @@ function _assistStopMeter() {
 
 function assistRecordToggle() {
   if (_assistBusy) return
+  if (!_assistAccessReady) {
+    assistLine('Droits non confirmés pour Assist — attendez la connexion au Switchboard.')
+    return
+  }
   if (_assistRecorder) { _assistRecorder.stop(); return }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     assistLine('Enregistrement non supporté par ce navigateur.')
