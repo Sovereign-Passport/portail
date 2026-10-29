@@ -1781,6 +1781,8 @@ var assistPlanBox = document.getElementById('assistPlanBox')
 
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
+var _assistPlanScope = null // scope used by the current plan
+var _assistPlanHost  = null // Switchboard host used by the current plan
 
 /** Only these contextual relations can use the Assist planner. */
 function _rightsAllowAssist(rights) {
@@ -1857,6 +1859,35 @@ function _assistScope() {
   if (did) return { type: 'did', id: did }
   var cl = _assistCluster()
   return cl ? { type: 'cluster', id: cl.cluster_id } : null
+}
+
+/**
+ * If the request names one of the DID's Clusters, use that Cluster scope.
+ * The Switchboard remains the authority: it verifies the relation for this
+ * exact scope, so naming a Cluster never grants rights in another one.
+ */
+function _assistTargetForText(text) {
+  if (!_unlockedVault) return null
+  var n = _assistNorm(text)
+  if (!n) return null
+  var clusters = (_bbClusters && _bbClusters.length)
+    ? _bbClusters
+    : buildClusterOptions(_unlockedVault)
+  var best = null
+  ;(clusters || []).forEach(function (c) {
+    if (!c || !c.cluster_id) return
+    var name = _assistNorm(c.name || c.label || '')
+    if (name.length < 3) return
+    var id = _assistNorm(c.cluster_id)
+    if (n.indexOf(name) === -1 && n.indexOf(id) === -1) return
+    if (!best || name.length > best.len) best = { cluster: c, len: name.length }
+  })
+  if (!best) return null
+  var c = best.cluster
+  return {
+    scope: { type: 'cluster', id: c.cluster_id },
+    host: c.endpoint || null,
+  }
 }
 
 /** Sign one Switchboard request with the unlocked Passport (presentation). */
@@ -1955,7 +1986,8 @@ function assistConfirm(plan) {
   assistSetBusy(true)
   assistSetStatus('Exécution signée…', true)
   assistPlanBox.style.display = 'none'
-  var sc = _assistScope()
+  var sc = _assistPlanScope || _assistScope()
+  var planHost = _assistPlanHost || null
   var chain = Promise.resolve()
   var results = []
   var touchedCalendar = false
@@ -1978,7 +2010,7 @@ function assistConfirm(plan) {
       var isCal = (a.service === 'calendar')
       if (isCal) touchedCalendar = true
       var asc   = isCal ? _calScope() : sc
-      var host  = isCal ? SPID_BOOTSTRAP_HOST : null
+      var host  = isCal ? SPID_BOOTSTRAP_HOST : planHost
       return _assistSignedBody(a.service, a.action, a.data || {}, asc, host)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
@@ -2198,9 +2230,15 @@ function assistBillboardPostOp(a) {
 
 function assistSubmit(text) {
   if (!text || _assistBusy || !_assistAccessReady) return
+  var target = _assistTargetForText(text)
+  var scope = target ? target.scope : _assistScope()
+  var host = target ? target.host : null
+  _assistPlanScope = scope
+  _assistPlanHost = host
   assistSetBusy(true)
   assistSetStatus('Planification…', true)
-  _assistSignedBody('assist', 'plan', { text: text, scope: _assistScope(), lang: _uiLang() })
+  _assistSignedBody('assist', 'plan',
+    { text: text, scope: scope, lang: _uiLang() }, scope, host)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       assistSetBusy(false)
