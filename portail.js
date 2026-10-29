@@ -2164,9 +2164,22 @@ assistInput.addEventListener('keydown', function (e) {
 // ── Voice: choose a mic, record, transcribe via the Switchboard ──────────
 var _assistRecorder = null
 var _assistChunks   = []
+var _assistRecTimer = null
+var _assistMime     = ''
 var _assistMicId    = (window.localStorage && localStorage.getItem('assistMicId')) || ''
 var _assistMeterRAF = null
 var _assistMaxPeak  = 0
+var ASSIST_MAX_REC_MS = 30000
+
+/** Container hint for the STT worker (the bytes stay authoritative). */
+function _assistAudioFormat(mime) {
+  var m = String(mime || '').toLowerCase()
+  if (m.indexOf('mp4') !== -1 || m.indexOf('aac') !== -1) return 'mp4'
+  if (m.indexOf('ogg') !== -1) return 'ogg'
+  if (m.indexOf('wav') !== -1) return 'wav'
+  if (m.indexOf('matroska') !== -1) return 'matroska'
+  return 'webm'
+}
 
 function _assistMicConstraints() {
   var c = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -2239,16 +2252,18 @@ function assistRecordToggle() {
     } catch (e) { actx = null }
 
     _assistRecorder = new MediaRecorder(stream)
+    _assistMime = _assistRecorder.mimeType || 'audio/webm'
     _assistRecorder.addEventListener('dataavailable', function (e) {
       if (e.data && e.data.size) _assistChunks.push(e.data)
     })
     _assistRecorder.addEventListener('stop', function () {
+      if (_assistRecTimer) { clearTimeout(_assistRecTimer); _assistRecTimer = null }
       stream.getTracks().forEach(function (t) { t.stop() })
       if (actx) { try { actx.close() } catch (e) {} }
       _assistStopMeter()
       _assistRecorder = null
       assistRecLabel.textContent = 'Enregistrer'
-      var blob = new Blob(_assistChunks, { type: 'audio/webm' })
+      var blob = new Blob(_assistChunks, { type: _assistMime })
       if (!blob.size) { assistLine('Rien enregistré.'); return }
       if (_assistMaxPeak < 3) {
         assistLine('Micro silencieux : aucun son capté. Choisis une autre entrée dans la liste « Micros » et vérifie qu’elle n’est pas muette.')
@@ -2258,12 +2273,18 @@ function assistRecordToggle() {
       var reader = new FileReader()
       reader.onload = function () {
         var b64 = String(reader.result).split(',')[1] || ''
-        _assistSignedBody('assist', 'transcribe', { audio_b64: b64, format: 'webm', lang: _voiceLang() })
+        _assistSignedBody('assist', 'transcribe', {
+          audio_b64: b64,
+          format: _assistAudioFormat(_assistMime),
+          lang: _voiceLang(),
+        })
           .then(function (resp) { return resp.text().then(function (t) {
             var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
             assistSetStatus('')
             if (!resp.ok || !d || !d.text) {
-              assistLine('Transcription indisponible : ' + ((d && (d.detail || d.error)) || ('HTTP ' + resp.status)))
+              var why = (d && (d.detail || d.error)) ||
+                        (resp.ok ? 'Aucune parole reconnue.' : ('HTTP ' + resp.status))
+              assistLine('Transcription indisponible : ' + why)
               return
             }
             assistInput.value = d.text
@@ -2276,6 +2297,12 @@ function assistRecordToggle() {
       reader.readAsDataURL(blob)
     })
     _assistRecorder.start()
+    if (_assistRecTimer) clearTimeout(_assistRecTimer)
+    _assistRecTimer = setTimeout(function () {
+      if (!_assistRecorder) return
+      assistSetStatus('Durée maximale atteinte (30 s)…')
+      _assistRecorder.stop()
+    }, ASSIST_MAX_REC_MS)
     assistRecLabel.textContent = 'Arrêter'
     assistSetStatus('Enregistrement… (cliquez Stop)')
     assistLoadMics()
