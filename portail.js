@@ -541,6 +541,8 @@ var bbNewBtn         = document.getElementById('bbNewBtn')
 var bbCreateHint     = document.getElementById('bbCreateHint')
 var bbStatus         = document.getElementById('bbStatus')
 var bbList           = document.getElementById('bbList')
+var bbChecklistDivider = document.getElementById('bbChecklistDivider')
+var bbChecklists     = document.getElementById('bbChecklists')
 var bbForm           = document.getElementById('bbForm')
 var bbTitle          = document.getElementById('bbTitle')
 var bbBody           = document.getElementById('bbBody')
@@ -1068,9 +1070,112 @@ function bbOwnerSync(cluster) {
     .catch(function(e) { throw new Error('Owner sync failed: ' + e.message) })
 }
 
+function bbHideChecklists() {
+  if (bbChecklistDivider) bbChecklistDivider.style.display = 'none'
+  if (bbChecklists) bbChecklists.innerHTML = ''
+}
+
+function bbRenderChecklists(lists, cluster, host) {
+  if (!bbChecklists) return
+  bbChecklists.innerHTML = ''
+  if (!lists || lists.length === 0) {
+    var empty = document.createElement('p')
+    empty.className = 'bb-empty'
+    empty.textContent = 'Aucune checklist pour ce Cluster.'
+    bbChecklists.appendChild(empty)
+    return
+  }
+  lists.forEach(function (list) {
+    var card = document.createElement('div')
+    card.className = 'bb-post'
+    var title = document.createElement('div')
+    title.className = 'bb-title'
+    title.textContent = list.title || 'Checklist'
+    card.appendChild(title)
+    var items = list.items || []
+    if (items.length === 0) {
+      var none = document.createElement('p')
+      none.className = 'bb-note'
+      none.textContent = 'Aucun item.'
+      card.appendChild(none)
+    }
+    items.forEach(function (item) {
+      var row = document.createElement('label')
+      row.className = 'bb-row'
+      row.style.cursor = 'pointer'
+      var cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = !!item.done
+      cb.addEventListener('change', function () {
+        bbToggleChecklistItem(item, cb.checked, cluster, host)
+      })
+      var label = document.createElement('span')
+      label.textContent = item.label || ''
+      row.appendChild(cb)
+      row.appendChild(label)
+      card.appendChild(row)
+    })
+    bbChecklists.appendChild(card)
+  })
+}
+
+/** Read the checklists of the selected Cluster through the Switchboard. */
+function bbLoadChecklists(cluster, host) {
+  if (!bbChecklists) return Promise.resolve()
+  if (!cluster || !host || !_unlockedVault) {
+    bbHideChecklists()
+    return Promise.resolve()
+  }
+  if (bbChecklistDivider) bbChecklistDivider.style.display = 'flex'
+  bbChecklists.innerHTML = ''
+  var loading = document.createElement('p')
+  loading.className = 'bb-empty'
+  loading.textContent = 'Loading checklists…'
+  bbChecklists.appendChild(loading)
+  return _selfSignedBody('billboard', 'checklist/list', {},
+      { type: 'cluster', id: cluster.cluster_id }, host)
+    .then(function (resp) {
+      return resp.text().then(function (t) {
+        var d = null
+        try { d = JSON.parse(t) } catch (e) { d = null }
+        if (!resp.ok || !d || !Array.isArray(d.checklists)) {
+          throw new Error((d && (d.message || d.error)) || ('HTTP ' + resp.status))
+        }
+        bbRenderChecklists(d.checklists, cluster, host)
+      })
+    })
+    .catch(function (e) {
+      bbChecklists.innerHTML = ''
+      var err = document.createElement('p')
+      err.className = 'bb-empty'
+      err.textContent = 'Checklists indisponibles : ' + ((e && e.message) || e)
+      bbChecklists.appendChild(err)
+    })
+}
+
+function bbToggleChecklistItem(item, done, cluster, host) {
+  return _selfSignedBody('billboard', 'checklist/toggle',
+      { item_id: item.id, done: !!done },
+      { type: 'cluster', id: cluster.cluster_id }, host)
+    .then(function (resp) {
+      return resp.text().then(function (t) {
+        var d = null
+        try { d = JSON.parse(t) } catch (e) { d = null }
+        if (!resp.ok) {
+          throw new Error((d && (d.message || d.error)) || ('HTTP ' + resp.status))
+        }
+        return bbLoadChecklists(cluster, host)
+      })
+    })
+    .catch(function (e) {
+      bbShowStatus('Checklist : ' + ((e && e.message) || e))
+    })
+}
+
 /** Public (non-level) announcements — read-only, no scope. */
 function loadPublicBillboard() {
   if (!_unlockedVault) return Promise.resolve()
+  bbHideChecklists()
   bbNewBtn.style.display = 'none'
   bbHideForm()
   bbConfirm.style.display = 'none'
@@ -1115,9 +1220,13 @@ function loadClusterBillboard() {
     bbNewBtn.style.display = 'none'
     bbHideForm()
     bbConfirm.style.display = 'none'
+    bbHideChecklists()
     bbRenderDisconnected()
     return Promise.resolve()
   }
+
+  // Checklists are a Cluster-scoped service; load them alongside posts.
+  bbLoadChecklists(cluster, host)
 
   // Diagnostics — surfaced in the error message so a phone failure can be read.
   var diag = { host: host, status: null, sync: null }
@@ -1790,18 +1899,24 @@ function _rightsAllowAssist(rights) {
 }
 
 function assistInit() {
+  // A partial/cached first load may call this before the section-6 refs ran.
+  if (!assistDivider) assistDivider = document.getElementById('assistDivider')
+  if (!assistField) assistField = document.getElementById('assistField')
+  if (!assistDivider || !assistField) return
   assistDivider.style.display = 'flex'
   assistField.style.display   = 'block'
   assistSetReady(_rightsAllowAssist(_accessRights))
 }
 
 function assistLine(text) {
+  if (!assistLog) return
   var p = document.createElement('div')
   p.className = 'bb-note'
   p.textContent = text
   assistLog.appendChild(p)
 }
 function assistSetStatus(text, loading) {
+  if (!assistStatus) return
   if (!text) {
     assistStatus.style.display = 'none'
     assistStatus.textContent = ''
