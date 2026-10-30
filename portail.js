@@ -2108,6 +2108,66 @@ function assistRenderPlan(plan) {
   }
 }
 
+function _assistReadChecklists(scope, host) {
+  return _selfSignedBody('billboard', 'checklist/list', {}, scope, host)
+    .then(function (resp) {
+      return resp.text().then(function (t) {
+        var d = null
+        try { d = JSON.parse(t) } catch (e) { d = null }
+        if (!resp.ok || !d || !Array.isArray(d.checklists)) {
+          throw new Error((d && (d.message || d.error)) || ('HTTP ' + resp.status))
+        }
+        return d.checklists
+      })
+    })
+}
+
+function _assistFindChecklist(lists, ref) {
+  var nref = _assistNorm(ref)
+  if (!nref) return lists.length === 1 ? lists[0] : null
+  for (var i = 0; i < lists.length; i++) {
+    var nt = _assistNorm(lists[i].title)
+    if (nt.indexOf(nref) !== -1 || nref.indexOf(nt) !== -1) return lists[i]
+  }
+  return lists.length === 1 ? lists[0] : null
+}
+
+function assistChecklistUpdate(a, scope, host) {
+  var d = a.data || {}
+  var ref = String(d.ref || '').trim()
+  if (!ref) return Promise.reject(new Error('checklist cible manquante'))
+  return _assistReadChecklists(scope, host).then(function (lists) {
+    var found = _assistFindChecklist(lists, ref)
+    if (!found) throw new Error('checklist introuvable (ref: "' + ref + '")')
+    var body = { id: found.id }
+    if (d.new_title) body.title = d.new_title
+    if (Array.isArray(d.items)) {
+      body.items = d.items.map(function (it) {
+        return typeof it === 'string' ? { label: it } : it
+      })
+    }
+    if (Array.isArray(d.remove_item_ids)) body.remove_item_ids = d.remove_item_ids
+    if (!body.title && !body.items && !body.remove_item_ids) {
+      throw new Error('aucune modification de checklist')
+    }
+    return _assistSignedBody('billboard', 'checklist/update', body, scope, host)
+      .then(function (resp) {
+        return resp.text().then(function (t) {
+          var r = null
+          try { r = JSON.parse(t) } catch (e) { r = null }
+          if (!resp.ok) {
+            throw new Error((r && (r.message || r.error)) || ('HTTP ' + resp.status))
+          }
+          var selected = bbSelectedCluster && bbSelectedCluster()
+          if (selected && selected.cluster_id === scope.id) {
+            bbLoadChecklists({ cluster_id: scope.id }, host || _assistHost())
+          }
+          return r
+        })
+      })
+  })
+}
+
 function assistConfirm(plan) {
   if (!_assistAccessReady) {
     assistLine('Droits non confirmés pour Assist — action non exécutée.')
@@ -2123,8 +2183,18 @@ function assistConfirm(plan) {
   var chain = Promise.resolve()
   var results = []
   var touchedCalendar = false
+  var touchedChecklist = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
+      if (a.service === 'billboard' && a.action === 'checklist/update') {
+        touchedChecklist = true
+        return assistChecklistUpdate(a, sc, planHost)
+          .then(function () { results.push('billboard/checklist/update → OK') })
+          .catch(function (e) { results.push('billboard/checklist/update → erreur (' + e.message + ')') })
+      }
+      if (a.service === 'billboard' && a.action.indexOf('checklist/') === 0) {
+        touchedChecklist = true
+      }
       if (a.service === 'billboard' && a.action === 'action') {
         // Edit / repost a Billboard post — resolved + signed here (no bypass).
         return assistBillboardPostOp(a)
@@ -2162,6 +2232,12 @@ function assistConfirm(plan) {
     if (touchedCalendar) {
       calendarReset()
       if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
+    }
+    if (touchedChecklist && sc && sc.type === 'cluster') {
+      var selected = bbSelectedCluster && bbSelectedCluster()
+      if (selected && selected.cluster_id === sc.id) {
+        bbLoadChecklists({ cluster_id: sc.id }, planHost || _assistHost())
+      }
     }
   })
 }
