@@ -2616,7 +2616,7 @@ function assistRecordToggle() {
       if (actx) { try { actx.close() } catch (e) {} }
       _assistStopMeter()
       _assistRecorder = null
-      assistRecLabel.textContent = 'Enregistrer'
+      assistRecLabel.textContent = window.spidT ? spidT('assist.record') : 'Enregistrer'
       var blob = new Blob(_assistChunks, { type: _assistMime })
       if (!blob.size) { assistLine('Rien enregistré.'); return }
       if (_assistMaxPeak < 3) {
@@ -2657,7 +2657,7 @@ function assistRecordToggle() {
       assistSetStatus('Durée maximale atteinte (30 s)…')
       _assistRecorder.stop()
     }, ASSIST_MAX_REC_MS)
-    assistRecLabel.textContent = 'Arrêter'
+    assistRecLabel.textContent = window.spidT ? spidT('assist.stop') : 'Arrêter'
     assistSetStatus('Enregistrement… (cliquez Stop)')
     assistLoadMics()
   }).catch(function (e) {

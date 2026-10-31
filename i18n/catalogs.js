@@ -199,7 +199,9 @@ window.SPID_I18N_CATALOG = {
     "relations.share_icons": "Icons",
     "relations.share_feedback": "Feedback",
     "relations.share_relations": "Relations",
-    "relations.did_prefix": "DID · "
+    "relations.did_prefix": "DID · ",
+    "assist.record": "Record",
+    "assist.stop": "Stop"
   },
   "fr": {
     "ui.0": "Passeport Souverain",
@@ -400,7 +402,9 @@ window.SPID_I18N_CATALOG = {
     "relations.share_icons": "Icônes",
     "relations.share_feedback": "Feedback",
     "relations.share_relations": "Relations",
-    "relations.did_prefix": "DID · "
+    "relations.did_prefix": "DID · ",
+    "assist.record": "Enregistrer",
+    "assist.stop": "Arrêter"
   },
   "es": {
     "ui.0": "Pasaporte Soberano",
@@ -601,6 +605,8 @@ window.SPID_I18N_CATALOG = {
     "relations.share_icons": "Iconos",
     "relations.share_feedback": "Feedback",
     "relations.share_relations": "Relaciones",
-    "relations.did_prefix": "DID · "
+    "relations.did_prefix": "DID · ",
+    "assist.record": "Grabar",
+    "assist.stop": "Detener"
   }
 };
