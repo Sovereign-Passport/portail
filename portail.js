@@ -2457,7 +2457,7 @@ function assistSubmit(text) {
   assistSetBusy(true)
   assistSetStatus('Planification…', true)
   var contextPromise = Promise.resolve(null)
-  if (target && /check\s*-?\s*list|checklist/i.test(text)) {
+  if (target && /check\s*-?\s*list|checklist|lista\s+de\s+verificaci|lista\s+de\s+tareas|task\s+list/i.test(text)) {
     contextPromise = _assistReadChecklists(scope, host)
       .then(function (lists) { return { checklists: lists } })
       .catch(function () { return null })
