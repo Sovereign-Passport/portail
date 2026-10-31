@@ -19,7 +19,7 @@
         <div class="mark">Sovereign Passport</div>
         <h1>Universal Switchboard</h1>
         <div class="sub">Portal to sovereign services</div>
-        <div class="lang-bar" role="group" aria-label="Language">
+        <div class="lang-bar" role="group" aria-label="Language" data-i18n-aria-label="app.language">
           <button class="lang-btn" type="button" data-lang="fr" title="Français" aria-label="Français"><svg viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true"><rect width="20" height="40" fill="#0055A4"/><rect x="20" width="20" height="40" fill="#fff"/><rect x="40" width="20" height="40" fill="#EF4135"/></svg></button>
           <button class="lang-btn" type="button" data-lang="en" title="English" aria-label="English"><svg viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true"><rect width="60" height="40" fill="#012169"/><path d="M0 0 L60 40 M60 0 L0 40" stroke="#fff" stroke-width="8"/><path d="M0 0 L60 40 M60 0 L0 40" stroke="#C8102E" stroke-width="4"/><path d="M30 0 V40 M0 20 H60" stroke="#fff" stroke-width="14"/><path d="M30 0 V40 M0 20 H60" stroke="#C8102E" stroke-width="8"/></svg></button>
           <button class="lang-btn" type="button" data-lang="es" title="Español" aria-label="Español"><svg viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true"><rect width="60" height="40" fill="#AA151B"/><rect y="10" width="60" height="20" fill="#F1BF00"/></svg></button>
@@ -27,7 +27,7 @@
       </div>
 
       <!-- Service tabs — Assist is the default active service -->
-      <div class="tabs" role="tablist" aria-label="Sovereign Passport services">
+      <div class="tabs" role="tablist" aria-label="Sovereign Passport services" data-i18n-aria-label="app.services_label">
         <button class="tab" id="tab-assist" role="tab" type="button"
                 aria-controls="panel-assist" aria-selected="true" data-service="assist">Assist</button>
         <button class="tab" id="tab-billboard" role="tab" type="button"
@@ -37,7 +37,7 @@
         <button class="tab" id="tab-messages" role="tab" type="button"
                 aria-controls="panel-messages" aria-selected="false" data-service="messages" tabindex="-1">Messages<span class="tab-dot" id="msgDot" style="display:none"></span></button>
         <button class="tab" id="tab-relations" role="tab" type="button"
-                aria-controls="panel-relations" aria-selected="false" data-service="relations" tabindex="-1">Relations</button>
+                aria-controls="panel-relations" aria-selected="false" data-service="relations" tabindex="-1" data-i18n="app.tab_relations">Relations</button>
       </div>
 
       <!-- Assist — current Passport detection and access flow (unchanged) -->
@@ -59,7 +59,7 @@
         </div>
 
         <div class="field" id="lnaField" style="display:none">
-          <button id="lnaAllowBtn" class="btn btn-gold" type="button">
+          <button id="lnaAllowBtn" class="btn btn-gold" type="button" data-i18n="assist.lna_button">
             Autoriser l’accès au serveur SPID afin d’obtenir les services demandés
           </button>
         </div>
@@ -120,7 +120,7 @@
         <div id="bbStatus" class="bb-status" style="display:none;"></div>
         <div id="bbList" class="bb-list"></div>
 
-        <div class="divider" id="bbChecklistDivider" style="display:none">checklists</div>
+        <div class="divider" id="bbChecklistDivider" style="display:none" data-i18n="billboard.checklists">checklists</div>
         <div id="bbChecklists" class="bb-list"></div>
 
         <!-- Composer — always scoped to the selected Cluster -->
@@ -177,76 +177,76 @@
 
       <section class="tab-panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" tabindex="0" hidden>
         <div class="ms-bar">
-          <button class="btn btn-ghost" id="msInboxBtn" type="button" aria-pressed="true">Boîte</button>
-          <button class="btn btn-ghost" id="msSentBtn" type="button" aria-pressed="false">Envoyés</button>
+          <button class="btn btn-ghost" id="msInboxBtn" type="button" aria-pressed="true" data-i18n="messages.inbox">Boîte</button>
+          <button class="btn btn-ghost" id="msSentBtn" type="button" aria-pressed="false" data-i18n="messages.sent">Envoyés</button>
           <button class="btn btn-ghost" id="msRefreshBtn" type="button">&#8635;</button>
         </div>
         <div id="msStatus" class="bb-status" style="display:none;"></div>
         <div id="msList" class="bb-list"></div>
 
-        <div class="divider">nouveau message</div>
+        <div class="divider" data-i18n="messages.new">nouveau message</div>
         <div class="field">
-          <label>Destinataire(s)</label>
-          <input id="msTo" class="did-input" type="text" placeholder="…ou une DID complète (did:key:z…)" autocomplete="off">
+          <label data-i18n="messages.recipients">Destinataire(s)</label>
+          <input id="msTo" class="did-input" type="text" placeholder="…ou une DID complète (did:key:z…)" data-i18n-placeholder="messages.did_placeholder" autocomplete="off">
         </div>
         <div class="field">
-          <label>Choisir dans mes communautés</label>
+          <label data-i18n="messages.pick_community">Choisir dans mes communautés</label>
           <details class="ms-picker">
             <summary id="msPickerSummary">Les communautés disponibles</summary>
             <div id="msToSel" class="ms-picker-list"></div>
           </details>
         </div>
         <div class="field">
-          <label>Message</label>
-          <textarea id="msBody" class="bb-textarea" rows="2" placeholder="Court et direct…"></textarea>
+          <label data-i18n="common.message">Message</label>
+          <textarea id="msBody" class="bb-textarea" rows="2" placeholder="Court et direct…" data-i18n-placeholder="messages.body_placeholder"></textarea>
         </div>
         <div class="bb-actions">
-          <button class="btn btn-gold" id="msSendBtn" type="button">Envoyer</button>
+          <button class="btn btn-gold" id="msSendBtn" type="button" data-i18n="common.send">Envoyer</button>
         </div>
       </section>
 
       <section class="tab-panel" id="panel-relations" role="tabpanel" aria-labelledby="tab-relations" tabindex="0" hidden>
         <div class="ms-bar">
-          <button class="btn btn-ghost" id="relRefreshBtn" type="button">&#8635; Rafraîchir</button>
+          <button class="btn btn-ghost" id="relRefreshBtn" type="button" data-i18n="relations.refresh">&#8635; Rafraîchir</button>
         </div>
         <div id="relStatus" class="bb-status" style="display:none;"></div>
 
         <div class="field">
-          <label>Portée</label>
+          <label data-i18n="relations.scope">Portée</label>
           <select id="relScope" class="bb-select"></select>
         </div>
 
         <div class="field">
-          <label>Partages de cette portée</label>
-          <p class="bb-note">Ce que vous acceptez de partager avec cette portée. Révoquable.</p>
+          <label data-i18n="relations.shares">Partages de cette portée</label>
+          <p class="bb-note" data-i18n="relations.shares_note">Ce que vous acceptez de partager avec cette portée. Révoquable.</p>
           <div id="relGrants" class="bb-list"></div>
         </div>
 
-        <div class="divider">inviter</div>
+        <div class="divider" data-i18n="relations.invite">inviter</div>
         <div class="field">
-          <label>Membres</label>
+          <label data-i18n="relations.members">Membres</label>
           <div id="relMembers" class="bb-list"></div>
         </div>
         <div class="field">
-          <label>DID invitée</label>
-          <input id="relTo" class="did-input" type="text" placeholder="did:key:z… (ou laisser vide pour un lien)" autocomplete="off">
+          <label data-i18n="relations.invited_did">DID invitée</label>
+          <input id="relTo" class="did-input" type="text" placeholder="did:key:z… (ou laisser vide pour un lien)" data-i18n-placeholder="relations.did_placeholder" autocomplete="off">
         </div>
         <div class="field">
-          <label>Pseudo (facultatif)</label>
+          <label data-i18n="relations.handle">Pseudo (facultatif)</label>
           <input id="relHandle" class="did-input" type="text" autocomplete="off">
         </div>
         <div class="bb-actions">
-          <button class="btn btn-gold" id="relInviteBtn" type="button">Inviter</button>
+          <button class="btn btn-gold" id="relInviteBtn" type="button" data-i18n="relations.invite_btn">Inviter</button>
         </div>
         <div class="field" id="relLinkWrap" style="display:none;">
-          <label>Lien d’invitation</label>
+          <label data-i18n="relations.invite_link">Lien d’invitation</label>
           <div style="display:flex;gap:6px;">
             <input id="relLink" class="did-input" type="text" readonly style="flex:1;">
-            <button class="btn btn-ghost" id="relCopyBtn" type="button" style="width:auto;margin:0;">Copier</button>
+            <button class="btn btn-ghost" id="relCopyBtn" type="button" style="width:auto;margin:0;" data-i18n="relations.copy">Copier</button>
           </div>
           <div class="rel-share-actions">
-            <a id="relEmail" class="btn btn-ghost" href="#">Email</a>
-            <a id="relSms" class="btn btn-ghost" href="#">Message</a>
+            <a id="relEmail" class="btn btn-ghost" href="#" data-i18n="common.email">Email</a>
+            <a id="relSms" class="btn btn-ghost" href="#" data-i18n="common.message">Message</a>
           </div>
           <div id="relQr" class="rel-qr"></div>
         </div>
@@ -261,7 +261,8 @@
   </div>
 
 <script type="module" src="relations-client.js?v=2"></script>
-<script src="spid.i18n.js?v=3"></script>
-<script src="portail.js?v=37"></script>
+<script src="i18n/catalogs.js?v=1"></script>
+<script src="spid.i18n.js?v=4"></script>
+<script src="portail.js?v=38"></script>
 </body>
 </html>

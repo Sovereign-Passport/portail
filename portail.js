@@ -2835,7 +2835,7 @@ function calendarRetry() {
 function calendarRender() {
   if (!calMonthEl) return
   var y = _calAnchor.getFullYear(), m = _calAnchor.getMonth()
-  var label = _calAnchor.toLocaleDateString('fr-CA', { month: 'long', year: 'numeric' })
+  var label = _calAnchor.toLocaleDateString(_calLocale(), { month: 'long', year: 'numeric' })
   calMonthEl.textContent = label.charAt(0).toUpperCase() + label.slice(1)
 
   // Group by day.
@@ -2851,7 +2851,6 @@ function calendarRender() {
 
   var today = _todayKey()
   var days  = new Date(y, m + 1, 0).getDate()
-  var names = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
 
   // ── Day strip (whole displayed month) ──
   calStripEl.innerHTML = ''
@@ -2865,7 +2864,7 @@ function calendarRender() {
     if (dk === _calSel) { btn.classList.add('is-sel'); selBtn = btn }
 
     var dw = document.createElement('span'); dw.className = 'agenda-dow'
-    dw.textContent = names[new Date(y, m, i).getDay()]
+    dw.textContent = new Intl.DateTimeFormat(_calLocale(), { weekday: 'short' }).format(new Date(y, m, i))
     var num = document.createElement('span'); num.className = 'agenda-num'
     num.textContent = String(i)
     var dots = document.createElement('span'); dots.className = 'agenda-dots'
@@ -2909,10 +2908,15 @@ function calendarRender() {
   if (!any) calendarEmpty('Aucune entrée dans ce mois.')
 }
 
+function _calLocale() {
+  var l = _uiLang();
+  return l === 'fr' ? 'fr-CA' : l === 'es' ? 'es-ES' : 'en-CA';
+}
+
 function _dayLabel(y, m, d) {
-  var names = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
-  var mois  = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc']
-  return names[new Date(y, m, d).getDay()] + ' ' + d + ' ' + mois[m]
+  return new Intl.DateTimeFormat(_calLocale(), {
+    weekday: 'short', day: 'numeric', month: 'short'
+  }).format(new Date(y, m, d));
 }
 
 function calendarItem(e) {
@@ -2922,7 +2926,8 @@ function calendarItem(e) {
   var body = document.createElement('div'); body.className = 'agenda-body'
   var line = document.createElement('div'); line.className = 'agenda-line'
   var t = document.createElement('span'); t.className = 'agenda-time'; t.textContent = _hhmm(e.starts_at)
-  var ti = document.createElement('span'); ti.className = 'agenda-title'; ti.textContent = e.title || '(sans titre)'
+  var ti = document.createElement('span'); ti.className = 'agenda-title'
+  ti.textContent = e.title || (window.spidT ? spidT('calendar.no_title') : '(sans titre)')
   line.appendChild(t); line.appendChild(ti)
   var sc = document.createElement('span'); sc.className = 'agenda-scope'
   sc.textContent = _shortScope(e._scope && e._scope.label)
@@ -3271,6 +3276,18 @@ function relLoad() {
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
+function _relKindLabel(kind) {
+  if (!window.spidT) return kind
+  var out = spidT('relations.kind.' + kind)
+  return out === 'relations.kind.' + kind ? kind : out
+}
+
+function _relStatusLabel(status) {
+  if (!window.spidT) return status
+  var out = spidT('relations.status.' + status)
+  return out === 'relations.status.' + status ? status : out
+}
+
 function relActive(r) {
   if (r.kind === 'cluster') {
     return r.cluster_status !== 'revoked' &&
@@ -3309,7 +3326,7 @@ function relRender(d, C) {
   scopes.forEach(function (r) {
     var o = document.createElement('option')
     o.value = r.kind + '|' + r.id
-    o.textContent = (r.name || r.id) + ' · ' + r.kind
+    o.textContent = (r.name || r.id) + ' · ' + _relKindLabel(r.kind)
     relScope.appendChild(o)
   })
   if (previousScope) relScope.value = previousScope
@@ -3328,8 +3345,13 @@ function relRender(d, C) {
 function relGrantLabel(raw) {
   var types = null
   try { types = JSON.parse(raw) } catch (e) { types = null }
-  if (!Array.isArray(types) || !types.length) return 'Minimal (DID)'
-  var labels = { handle: 'Pseudo', icons: 'Icônes', feedback: 'Feedback', relations: 'Relations' }
+  if (!Array.isArray(types) || !types.length) return spidT('relations.minimal_did')
+  var labels = {
+    handle: spidT('relations.share_handle'),
+    icons: spidT('relations.share_icons'),
+    feedback: spidT('relations.share_feedback'),
+    relations: spidT('relations.share_relations')
+  }
   var names = types.map(function (t) {
     if (labels[t]) return labels[t]
     if (t.indexOf(':') !== -1) {
@@ -3338,19 +3360,19 @@ function relGrantLabel(raw) {
     }
     return t
   })
-  if (types.length === 1 && types[0] === 'handle') return 'Minimal (DID, Pseudo)'
-  return 'DID · ' + names.join(' · ')
+  if (types.length === 1 && types[0] === 'handle') return spidT('relations.minimal_did_handle')
+  return spidT('relations.did_prefix') + names.join(' · ')
 }
 
 function relRenderGrants() {
   if (!relGrants) return
   var target = relMembers()
   relGrants.innerHTML = ''
-  if (!target) { relNote(relGrants, 'Choisis une portée.'); return }
+  if (!target) { relNote(relGrants, spidT('relations.scope_required')); return }
   var gs = _relGrants.filter(function (g) {
     return g.consumer_type === target.type && g.consumer_id === target.id
   })
-  if (!gs.length) { relNote(relGrants, 'Aucun partage pour cette portée.'); return }
+  if (!gs.length) { relNote(relGrants, spidT('relations.no_share')); return }
   gs.forEach(function (g) {
     var el = document.createElement('div'); el.className = 'bb-row'
     var left = document.createElement('div')
@@ -3410,7 +3432,7 @@ function relRenderMembers(el, target, members) {
     var n = document.createElement('div'); n.className = 'bb-title'
     n.textContent = m.handle || 'Sans pseudo'
     var meta = document.createElement('div'); meta.className = 'bb-note'
-    meta.textContent = m.status + (m.is_issuer ? ' · issuer' : '')
+    meta.textContent = _relStatusLabel(m.status) + (m.is_issuer ? ' · ' + spidT('relations.issuer') : '')
     left.appendChild(n); left.appendChild(meta); row.appendChild(left)
 
     var copy = document.createElement('button')
