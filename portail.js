@@ -1981,6 +1981,16 @@ function _assistScope() {
  * The Switchboard remains the authority: it verifies the relation for this
  * exact scope, so naming a Cluster never grants rights in another one.
  */
+function _assistSelectedTarget() {
+  if (!_unlockedVault) return null
+  var c = bbSelectedCluster && bbSelectedCluster()
+  if (!c || !c.cluster_id) return null
+  return {
+    scope: { type: 'cluster', id: c.cluster_id },
+    host: c.endpoint || null,
+  }
+}
+
 function _assistTargetForText(text) {
   if (!_unlockedVault) return null
   var n = _assistNorm(text)
@@ -2146,6 +2156,7 @@ function assistChecklistUpdate(a, scope, host) {
         return typeof it === 'string' ? { label: it } : it
       })
     }
+    if (d.replace_items === true) body.replace_items = true
     if (Array.isArray(d.remove_item_ids)) body.remove_item_ids = d.remove_item_ids
     if (!body.title && !body.items && !body.remove_item_ids) {
       throw new Error('aucune modification de checklist')
@@ -2438,15 +2449,23 @@ function assistBillboardPostOp(a) {
 
 function assistSubmit(text) {
   if (!text || _assistBusy || !_assistAccessReady) return
-  var target = _assistTargetForText(text)
+  var target = _assistTargetForText(text) || _assistSelectedTarget()
   var scope = target ? target.scope : _assistScope()
   var host = target ? target.host : null
   _assistPlanScope = scope
   _assistPlanHost = host
   assistSetBusy(true)
   assistSetStatus('Planification…', true)
-  _assistSignedBody('assist', 'plan',
-    { text: text, scope: scope, lang: _uiLang() }, scope, host)
+  var contextPromise = Promise.resolve(null)
+  if (target && /check\s*-?\s*list|checklist/i.test(text)) {
+    contextPromise = _assistReadChecklists(scope, host)
+      .then(function (lists) { return { checklists: lists } })
+      .catch(function () { return null })
+  }
+  contextPromise.then(function (context) {
+    return _assistSignedBody('assist', 'plan',
+      { text: text, scope: scope, lang: _uiLang(), context: context }, scope, host)
+  })
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       assistSetBusy(false)
