@@ -5,11 +5,10 @@
  * Same-origin as the Passport PWA — reads the SAME IndexedDB vault.
  * Crypto primitives identical to passport.crypto.js. WebCrypto only.
  *
- * The switchboard host is derived from the membership credential's
- * issuer did:web (your passport talks to YOUR vine). SPID_BOOTSTRAP_HOST
- * is the SPID/Switchboard entry point for bare passports and for owned
- * Clusters — it is NOT a relation with any Vine and is NEVER written into
- * vine_endpoint or Cluster metadata.
+ * The Switchboard is network-wide (SPID_SWITCH_HOST). Vine-specific
+ * addresses (SPID_BOOTSTRAP_HOST, credential/DID endpoints) remain for
+ * their own services, invitations, synchronisation and DID documents.
+ * The hostname never determines the scope; scope stays in the DID request.
  *
  * ES2017 target. Forbidden: ?. ?? 0n 600_000 catch{} {...obj}
  */
@@ -18,9 +17,10 @@
 // SECTION 1 — CRYPTO (identical to passport.crypto.js primitives)
 // ═════════════════════════════════════════════════════════════════════════
 
-// SPID/Switchboard entry point (alpha node). NOT a relation with a Vine;
-// never persisted into vine_endpoint, ClusterVineRelation or Cluster metadata.
+// Vine-specific address, retained for invitations, QR and DID/service metadata.
+// The network-wide Switchboard is SPID_SWITCH_HOST below.
 var SPID_BOOTSTRAP_HOST = 'https://mdusl.sovereign-passport.id'
+const SPID_SWITCH_HOST = 'https://sb.sovereign-passport.id'
 var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
 var PBKDF2_ITER = 600000
 
@@ -197,20 +197,6 @@ function buildPresentation(opts) {
 // SECTION 2 — ACCESS DISCOVERY
 // ═════════════════════════════════════════════════════════════════════════
 
-// Derive the switchboard host from the credential issuer's did:web.
-// did:web:mdusl.sovereign-passport.id → https://mdusl.sovereign-passport.id
-// Bare passports (no credential) fall back to the network welcome door.
-function switchboardHostFor(credential) {
-  if (credential && credential.issuer_did &&
-      credential.issuer_did.indexOf('did:web:') === 0) {
-    var domain = credential.issuer_did.slice('did:web:'.length)
-    // did:web path segments use ':' — convert to '/' (rare, but spec-legal)
-    domain = domain.split(':').join('/')
-    return 'https://' + domain
-  }
-  return SPID_BOOTSTRAP_HOST
-}
-
 function accessScopeFor(credential) {
   if (!credential) return null
   if (credential.scope === 'cluster' && credential.cluster_id) {
@@ -266,7 +252,7 @@ function requestAccess(unlockedVault, options) {
   })[0]
 
   var holderDid = unlockedVault.identity.id
-  var host      = switchboardHostFor(credential)
+  var host      = SPID_SWITCH_HOST
   var scope      = accessScopeFor(credential)
 
   return importPrivateKey(unlockedVault.keys.privateKey).then(function(privateKey) {
@@ -527,9 +513,8 @@ pwInput.addEventListener('keydown', function(e) {
 // SECTION 5 — BILLBOARD (Cluster selected from the unlocked Passport vault)
 //
 // Clusters come ONLY from canonical cluster_id (UUID) sources; Vines,
-// Vignards and legacy memberships are ignored. The Switchboard host is the
-// Cluster's own stored endpoint for JOINED Clusters, and the SPID/Switchboard
-// entry point (SPID_BOOTSTRAP_HOST) for OWNED Clusters — never a Vine relation.
+// Vignards and legacy memberships are ignored. Every Switchboard call goes
+// to SPID_SWITCH_HOST; the Cluster UUID stays in the request scope.
 // Reading and creating both require the unlocked Passport (Ed25519 key).
 // ═════════════════════════════════════════════════════════════════════════
 
@@ -729,9 +714,9 @@ function bbRenderClusterSelect(preferredId) {
   else bbClusterSelect.value = '__public__'
 }
 
-/** One POST to a Cluster's Switchboard. Host is the Cluster endpoint only. */
-function bbSwitch(host, body) {
-  return fetch(host + '/api/switch', {
+/** One POST to the network-wide Switchboard. */
+function bbSwitch(body) {
+  return fetch(SPID_SWITCH_HOST + '/api/switch', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
@@ -828,31 +813,20 @@ function renderBillboardPosts(posts) {
   })
 }
 
-/** A Cluster with no stored endpoint has no Switchboard — never invent one. */
-function bbRenderDisconnected() {
-  bbHideStatus()
-  bbList.innerHTML = ''
-  var p = document.createElement('p')
-  p.className = 'bb-empty'
-  p.textContent = 'Cluster services are not connected yet.'
-  bbList.appendChild(p)
-}
-
 /**
  * Push the COMPLETE owned set (self-issued proofs) so the Switchboard can
  * mirror its projection: a Cluster ABSENT from the set is removed from it
  * (revoked if not attached to a Vine, held pending if it is). Best-effort —
  * a reconciliation failure never blocks the pull.
- * @param {string} host
  * @param {string} did
  */
-function bbOwnerReconcile(host, did) {
+function bbOwnerReconcile(did) {
   if (!_unlockedVault || !_vaultKey) return Promise.resolve()
   var proofs = buildClusterOptions(_unlockedVault)
     .filter(function(c) { return c.owned && c.ownerProof })
     .map(function(c) { return c.ownerProof })
 
-  return fetch(host + '/api/switch/nonce')
+  return fetch(SPID_SWITCH_HOST + '/api/switch/nonce')
     .then(function(r) { if (!r.ok) throw new Error('nonce'); return r.json() })
     .then(function(nd) {
       var nonce = nd.nonce, issued_at = nowIso()
@@ -863,7 +837,7 @@ function bbOwnerReconcile(host, did) {
         .then(function(sig) {
           var sync = { type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
                        proofs: base.proofs, pending: base.pending, complete: base.complete, signature: sig }
-          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+          return bbSwitch({ service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
         })
     })
 }
@@ -878,12 +852,11 @@ function bbOwnerReconcile(host, did) {
 function bbPullAndImport() {
   if (!_unlockedVault || !_vaultKey) return Promise.resolve({ changed: false })
   var did  = _unlockedVault.identity.id
-  var host = SPID_BOOTSTRAP_HOST
   // Best-effort FIRST: push the COMPLETE owned set so the Switchboard can
   // reconcile its projection (a Cluster absent from it is removed). Never
   // blocks the pull — the pull still works if this fails.
-  return bbOwnerReconcile(host, did).catch(function() {})
-    .then(function() { return fetch(host + '/api/switch/nonce') })
+  return bbOwnerReconcile(did).catch(function() {})
+    .then(function() { return fetch(SPID_SWITCH_HOST + '/api/switch/nonce') })
     .then(function(r) { if (!r.ok) throw new Error('nonce'); return r.json() })
     .then(function(nd) {
       var nonce = nd.nonce, issued_at = nowIso()
@@ -893,7 +866,7 @@ function bbPullAndImport() {
         .then(function(sig) {
           var sync = { type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
                        proofs: base.proofs, pending: base.pending, signature: sig }
-          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+          return bbSwitch({ service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
         })
     })
     .then(function(resp) {
@@ -1034,8 +1007,7 @@ function bbOwnerSync(cluster) {
   var proof = cluster.ownerProof
   if (!proof) return Promise.reject(new Error('No owner proof found for this Cluster.'))
 
-  var host = SPID_BOOTSTRAP_HOST
-  return fetch(host + '/api/switch/nonce')
+  return fetch(SPID_SWITCH_HOST + '/api/switch/nonce')
     .then(function(resp) {
       if (!resp.ok) throw new Error('Could not reach the Switchboard for a nonce.')
       return resp.json()
@@ -1053,7 +1025,7 @@ function bbOwnerSync(cluster) {
             type: base.type, did: base.did, nonce: base.nonce, issued_at: base.issued_at,
             proofs: base.proofs, pending: base.pending, signature: signature,
           }
-          return bbSwitch(host, { service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
+          return bbSwitch({ service: 'spid', action: 'sync', did: did, nonce: nonce, data: { sync: sync } })
         })
     })
     .then(function(resp) {
@@ -1185,7 +1157,7 @@ function loadPublicBillboard() {
   loading.className = 'bb-empty'
   loading.textContent = 'Loading…'
   bbList.appendChild(loading)
-  return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'public' })
+  return bbSwitch({ service: 'billboard', action: 'public' })
     .then(function (resp) { return resp.text().then(function (t) {
       var data = null; try { data = JSON.parse(t) } catch (e) { data = null }
       if (!resp.ok || !data || !Array.isArray(data.posts)) {
@@ -1210,20 +1182,8 @@ function loadClusterBillboard() {
   var cluster = bbSelectedCluster()
   if (!_unlockedVault || !cluster) return Promise.resolve()
 
-  // Owned Clusters use the SPID/Switchboard entry point (never a Vine
-  // relation). Joined Clusters keep their own verified endpoint.
-  var isOwned = !!cluster.owned
-  var host    = isOwned ? SPID_BOOTSTRAP_HOST : cluster.endpoint
-
-  if (!isOwned && !cluster.endpoint) {
-    // Joined Cluster with no endpoint → no Switchboard at all.
-    bbNewBtn.style.display = 'none'
-    bbHideForm()
-    bbConfirm.style.display = 'none'
-    bbHideChecklists()
-    bbRenderDisconnected()
-    return Promise.resolve()
-  }
+  // One network-wide Switchboard; the Cluster scope stays in the request.
+  var host = SPID_SWITCH_HOST
 
   // Checklists are a Cluster-scoped service; load them alongside posts.
   bbLoadChecklists(cluster, host)
@@ -1243,10 +1203,10 @@ function loadClusterBillboard() {
   // Best-effort: reading announcements must never be blocked by a failed sync
   // — but its error is kept for the diagnostics below.
   var prep
-  if (isOwned && cluster.ownerProof) {
+  if (cluster.owned && cluster.ownerProof) {
     prep = bbOwnerSync(cluster).catch(function(e) { diag.sync = (e && e.message) || String(e) })
   } else {
-    if (isOwned) diag.sync = 'no owner proof in this vault'
+    if (cluster.owned) diag.sync = 'no owner proof in this vault'
     prep = Promise.resolve()
   }
 
@@ -1257,8 +1217,8 @@ function loadClusterBillboard() {
     return importPrivateKey(_unlockedVault.keys.privateKey)
       .then(function(privateKey) { return edSign(privateKey, JSON.stringify(proof)) })
       .then(function(signature) {
-        return fetch(host + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
-          return bbSwitch(host, {
+        return fetch(SPID_SWITCH_HOST + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
+          return bbSwitch({
             service: 'billboard', action: 'cluster/list', nonce: nd && nd.nonce,
             data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
           })
@@ -1536,7 +1496,7 @@ function bbPublish() {
 
   build.then(function(cred) {
     _bbPending = cred   // same id/signature reused on retry
-    return bbSwitch(cluster.endpoint, { service: 'billboard', action: 'action', data: cred })
+    return bbSwitch({ service: 'billboard', action: 'action', data: cred })
   }).then(function(resp) {
     return resp.text().then(function(t) {
       var data = null
@@ -1959,9 +1919,8 @@ function _assistCluster() {
   return (_bbClusters && _bbClusters.length) ? _bbClusters[0] : null
 }
 function _assistHost() {
-  // Same Switchboard as the access discovery: derived from the credential's
-  // issuer, never from an unrelated Cluster selection.
-  return switchboardHostFor(_assistCredential())
+  // One network-wide Switchboard; the domain does not determine scope.
+  return SPID_SWITCH_HOST
 }
 function _assistScope() {
   // Same scope as the access discovery (confirmed by the Switchboard).
@@ -1987,7 +1946,7 @@ function _assistSelectedTarget() {
   if (!c || !c.cluster_id) return null
   return {
     scope: { type: 'cluster', id: c.cluster_id },
-    host: c.endpoint || null,
+    host: SPID_SWITCH_HOST,
   }
 }
 
@@ -2028,16 +1987,15 @@ function _assistTargetForText(text) {
   var c = best.cluster
   return {
     scope: { type: 'cluster', id: c.cluster_id },
-    host: c.endpoint || null,
+    host: SPID_SWITCH_HOST,
   }
 }
 
 /** Sign one Switchboard request with the unlocked Passport (presentation). */
-function _assistSignedBody(service, action, data, scope, hostOverride) {
-  var host = hostOverride || _assistHost()
+function _assistSignedBody(service, action, data, scope, _hostOverride) {
   var cred = _assistCredential()
   var sc   = scope || _assistScope()
-  return fetch(host + '/api/switch/nonce')
+  return fetch(SPID_SWITCH_HOST + '/api/switch/nonce')
     .then(function (r) { if (!r.ok) throw new Error('nonce'); return r.json() })
     .then(function (n) {
       var body = { service: service, action: action, data: data || {} }
@@ -2065,7 +2023,7 @@ function _assistSignedBody(service, action, data, scope, hostOverride) {
         })
       })
     })
-    .then(function (body) { return bbSwitch(host, body) })
+    .then(function (body) { return bbSwitch(body) })
 }
 
 function assistRenderPlan(plan) {
@@ -2223,8 +2181,7 @@ function assistConfirm(plan) {
       var isCal = (a.service === 'calendar')
       if (isCal) touchedCalendar = true
       var asc   = isCal ? _calScope() : sc
-      var host  = isCal ? SPID_BOOTSTRAP_HOST : planHost
-      return _assistSignedBody(a.service, a.action, a.data || {}, asc, host)
+      return _assistSignedBody(a.service, a.action, a.data || {}, asc, SPID_SWITCH_HOST)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
           var label = resp.ok ? 'OK'
@@ -2247,7 +2204,7 @@ function assistConfirm(plan) {
     if (touchedChecklist && sc && sc.type === 'cluster') {
       var selected = bbSelectedCluster && bbSelectedCluster()
       if (selected && selected.cluster_id === sc.id) {
-        bbLoadChecklists({ cluster_id: sc.id }, planHost || _assistHost())
+        bbLoadChecklists({ cluster_id: sc.id }, SPID_SWITCH_HOST)
       }
     }
   })
@@ -2258,7 +2215,7 @@ function assistConfirm(plan) {
 // une LECTURE SB en arrière-plan pour résoudre la cible, puis SIGNE l'action SB.
 
 /** One signed cluster read (no bypass) — returns the posts, or []. */
-function assistClusterPosts(cluster, host) {
+function assistClusterPosts(cluster) {
   var did = _unlockedVault.identity.id
   var timestamp = Date.now()
   var proof = { action: 'billboard_cluster_list', did: did, cluster_id: cluster.cluster_id, timestamp: timestamp }
@@ -2269,8 +2226,8 @@ function assistClusterPosts(cluster, host) {
     .then(function () { return importPrivateKey(_unlockedVault.keys.privateKey) })
     .then(function (pk) { return edSign(pk, JSON.stringify(proof)) })
     .then(function (signature) {
-      return fetch(host + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
-        return bbSwitch(host, {
+      return fetch(SPID_SWITCH_HOST + '/api/switch/nonce').then(function (r) { return r.json() }).then(function (nd) {
+        return bbSwitch({
           service: 'billboard', action: 'cluster/list', nonce: nd && nd.nonce,
           data: { did: did, cluster_id: cluster.cluster_id, timestamp: timestamp, signature: signature },
         })
@@ -2286,13 +2243,12 @@ function assistClusterPosts(cluster, host) {
 /** Background SB reads: public feed + every Cluster the DID belongs to. */
 function assistReadAllPosts() {
   var jobs = []
-  jobs.push(bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'public' })
+  jobs.push(bbSwitch({ service: 'billboard', action: 'public' })
     .then(function (resp) { return resp.text() })
     .then(function (t) { var d = null; try { d = JSON.parse(t) } catch (e) { d = null }; return (d && d.posts) || [] })
     .catch(function () { return [] }))
   buildClusterOptions(_unlockedVault).forEach(function (c) {
-    var host = c.owned ? SPID_BOOTSTRAP_HOST : c.endpoint
-    if (host) jobs.push(assistClusterPosts(c, host))
+    jobs.push(assistClusterPosts(c))
   })
   return Promise.all(jobs).then(function (lists) {
     var out = []
@@ -2329,7 +2285,7 @@ function assistSendBillboardAction(payload) {
     .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
     .then(function (sig) {
       payload.signature = sig
-      return bbSwitch(SPID_BOOTSTRAP_HOST, { service: 'billboard', action: 'action', data: payload })
+      return bbSwitch({ service: 'billboard', action: 'action', data: payload })
     })
     .then(function (resp) { return resp.text().then(function (t) {
       var r = null; try { r = JSON.parse(t) } catch (e) { r = null }
@@ -2714,15 +2670,13 @@ function _calScopes() {
   var out = []
   var did = _holderDid()
   if (did) {
-    out.push({ type: 'did', id: did, host: SPID_BOOTSTRAP_HOST, label: 'Personnel', color: CAL_PALETTE[0] })
+    out.push({ type: 'did', id: did, host: SPID_SWITCH_HOST, label: 'Personnel', color: CAL_PALETTE[0] })
   }
   var clusters = buildClusterOptions(_unlockedVault)
   for (var i = 0; i < clusters.length; i++) {
     var c = clusters[i]
-    // Owned clusters live on the home Vine (same rule as the Billboard view);
-    // joined clusters keep their own endpoint.
-    var host = c.owned ? SPID_BOOTSTRAP_HOST : c.endpoint
-    if (!host) continue
+    // All scopes use the network-wide Switchboard.
+    var host = SPID_SWITCH_HOST
     out.push({
       type: 'cluster', id: c.cluster_id, host: host,
       label: c.name || c.cluster_id,
@@ -3010,7 +2964,7 @@ function msPickerSummary() {
 // Recipient list: DIDs reachable by shared membership + the home Vine.
 function msLoadContacts() {
   if (!msToSel || !_unlockedVault) return
-  _selfSignedBody('messages', 'contacts', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'contacts', {}, _msScope(), SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       var groups = (d && d.groups) || []
@@ -3078,7 +3032,7 @@ function msLoadContacts() {
 function msLoad() {
   if (!_unlockedVault) { msNote('Ouvrez votre passport pour voir vos messages.'); return }
   msSetStatus('Chargement…', true)
-  _selfSignedBody('messages', 'list', { box: _msBox }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'list', { box: _msBox }, _msScope(), SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       msSetStatus('')
@@ -3117,7 +3071,7 @@ function msRender(rows) {
 }
 
 function msMarkRead(id) {
-  _selfSignedBody('messages', 'read', { id: id }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'read', { id: id }, _msScope(), SPID_SWITCH_HOST)
     .then(function () { msLoad(); msUpdateDot() })
     .catch(function () {})
 }
@@ -3141,7 +3095,7 @@ function msSend() {
   var chain = Promise.resolve()
   recips.forEach(function (to) {
     chain = chain.then(function () {
-      return _selfSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_BOOTSTRAP_HOST)
+      return _selfSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_SWITCH_HOST)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
           results.push((resp.ok && d && d.ok) ? '✓' : '✗ ' + ((d && (d.error || d.message)) || resp.status))
@@ -3161,7 +3115,7 @@ function msSend() {
 
 function msUpdateDot() {
   if (!msDot || !_unlockedVault) return
-  _selfSignedBody('messages', 'pending', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _selfSignedBody('messages', 'pending', {}, _msScope(), SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       var n = (d && d.pending) || 0
@@ -3223,9 +3177,9 @@ function relInit() {
   if (!_relLoaded) relLoad()
 }
 
-function _selfSignedBody(service, action, data, scope, host) {
+function _selfSignedBody(service, action, data, scope, _host) {
   if (!_unlockedVault) throw new Error('locked')
-  var base = String(host || SPID_BOOTSTRAP_HOST).replace(/\/+$/, '')
+  var base = SPID_SWITCH_HOST
   return fetch(base + '/api/switch/nonce')
     .then(function (r) { if (!r.ok) throw new Error('nonce'); return r.json() })
     .then(function (n) {
@@ -3262,7 +3216,7 @@ function relLoad() {
   var C = _relContract()
   if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
   relSetStatus('Chargement…', true)
-  _relSelfCall('list', {}, _msScope(), SPID_BOOTSTRAP_HOST)
+  _relSelfCall('list', {}, _msScope(), SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       relSetStatus('')
@@ -3411,7 +3365,7 @@ function relLoadMembers() {
   var target = relMembers()
   if (!target) { relNote(el, 'Choisis une portée.'); return }
   relNote(el, 'Chargement…')
-  _relSelfCall('members', {}, target, SPID_BOOTSTRAP_HOST)
+  _relSelfCall('members', {}, target, SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       if (!resp.ok || !d || !Array.isArray(d.members)) {
@@ -3484,7 +3438,7 @@ function relDecide(target, subject, previous, status) {
           subject_did: subject, status: status, previous_status: previous,
           issued_at: issued, expires_at: null, signature: signature,
         },
-      }, target, SPID_BOOTSTRAP_HOST)
+      }, target, SPID_SWITCH_HOST)
     })
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
@@ -3548,7 +3502,7 @@ function relInvite() {
   relSetStatus('Invitation…', true)
   _relSelfCall('invite',
     { to_did: to, handle: handle, requested: ['handle'] },
-    target, SPID_BOOTSTRAP_HOST)
+    target, SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       relInviteBtn.disabled = false
@@ -3572,7 +3526,7 @@ function relRevoke(kind, id) {
   var target
   try { target = C.normalizeScope({ type: kind, id: id }) }
   catch (e) { return }
-  _relSelfCall('revoke', { scope: target }, _msScope(), SPID_BOOTSTRAP_HOST)
+  _relSelfCall('revoke', { scope: target }, _msScope(), SPID_SWITCH_HOST)
     .then(function () { relLoad() })
     .catch(function () {})
 }
