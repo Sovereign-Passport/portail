@@ -400,15 +400,27 @@ html.embed .panel { margin-bottom: 0; }
 .ms-picker-group {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--gold);
   margin: 9px 0 4px;
-  cursor: pointer;
 }
-.ms-picker-group input { accent-color: var(--gold); }
+.ms-picker-group-actions { display: flex; gap: 6px; }
+.ms-picker-tiny {
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-picker-tiny:hover { border-color: var(--gold); }
 .ms-picker-row {
   display: flex;
   align-items: center;

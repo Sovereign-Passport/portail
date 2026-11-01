@@ -201,7 +201,9 @@ window.SPID_I18N_CATALOG = {
     "relations.share_relations": "Relations",
     "relations.did_prefix": "DID · ",
     "assist.record": "Record",
-    "assist.stop": "Stop"
+    "assist.stop": "Stop",
+    "messages.select_all": "All",
+    "messages.select_none": "None"
   },
   "fr": {
     "ui.0": "Passeport Souverain",
@@ -404,7 +406,9 @@ window.SPID_I18N_CATALOG = {
     "relations.share_relations": "Relations",
     "relations.did_prefix": "DID · ",
     "assist.record": "Enregistrer",
-    "assist.stop": "Arrêter"
+    "assist.stop": "Arrêter",
+    "messages.select_all": "Tout",
+    "messages.select_none": "Aucun"
   },
   "es": {
     "ui.0": "Pasaporte Soberano",
@@ -607,6 +611,8 @@ window.SPID_I18N_CATALOG = {
     "relations.share_relations": "Relaciones",
     "relations.did_prefix": "DID · ",
     "assist.record": "Grabar",
-    "assist.stop": "Detener"
+    "assist.stop": "Detener",
+    "messages.select_all": "Todos",
+    "messages.select_none": "Ninguno"
   }
 };

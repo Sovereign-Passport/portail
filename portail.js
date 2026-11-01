@@ -965,17 +965,25 @@ function _adoptView(view, did, pub) {
 
   if (joined.length) {
     if (!vault.memberships) vault.memberships = []
-    var memIds = {}
-    vault.memberships.forEach(function(m) { if (m.cluster_id) memIds[m.cluster_id] = true })
     joined.forEach(function(j) {
-      if (j.status === 'revoked') return   // revoked cluster: never adopt
+      if (!j.cluster_id) return
+      if (j.status === 'revoked' || j.status === 'removed') return   // hosting revocation
       if (ownIds[j.cluster_id] || viewOwned[j.cluster_id]) return   // owned → never "joined"
-      if (j.cluster_id && !memIds[j.cluster_id]) {
-        vault.memberships.push({
-          cluster_id: j.cluster_id, node_name: j.name || null, cluster_name: j.name || null,
-          status: j.member_status || 'unknown', vine_endpoint: null,
-        })
-        memIds[j.cluster_id] = true; changed = true
+      var prev = vault.memberships.find(function(m) { return m.cluster_id === j.cluster_id })
+      var patch = {
+        cluster_id: j.cluster_id, node_name: j.name || null, cluster_name: j.name || null,
+        status: j.member_status || 'unknown',
+      }
+      // Keep the existing hosting hint unless the Vine explicitly provides one.
+      if (j.vine_endpoint) patch.vine_endpoint = j.vine_endpoint
+      if (prev) {
+        var before = JSON.stringify(prev)
+        Object.assign(prev, patch)
+        if (before !== JSON.stringify(prev)) changed = true
+      } else {
+        patch.vine_endpoint = j.vine_endpoint || null
+        vault.memberships.push(patch)
+        changed = true
       }
     })
   }
@@ -2955,7 +2963,7 @@ function msInit() { if (!_msLoaded) msLoad(); msUpdateDot(); msLoadContacts() }
 function msPickerSummary() {
   var summary = document.getElementById('msPickerSummary')
   if (!summary || !msToSel) return
-  var n = msToSel.querySelectorAll('input[type="checkbox"]:checked:not(.ms-picker-all-box)').length
+  var n = msToSel.querySelectorAll('input[type="checkbox"]:checked').length
   summary.textContent = n
     ? n + ' destinataire' + (n > 1 ? 's' : '') + ' sélectionné' + (n > 1 ? 's' : '')
     : 'Les communautés disponibles'
@@ -2984,15 +2992,24 @@ function msLoadContacts() {
         var section = document.createElement('div')
         section.className = 'ms-picker-section'
 
-        var head = document.createElement('label')
+        var head = document.createElement('div')
         head.className = 'ms-picker-group'
-        var all = document.createElement('input')
-        all.type = 'checkbox'
-        all.className = 'ms-picker-all-box'
         var title = document.createElement('span')
         title.textContent = (g.type === 'vine' ? 'Vine — ' : g.type === 'cluster' ? 'Cluster — ' : '') + (g.name || g.id)
-        head.appendChild(all)
+        var actions = document.createElement('span')
+        actions.className = 'ms-picker-group-actions'
+        var allBtn = document.createElement('button')
+        allBtn.type = 'button'
+        allBtn.className = 'ms-picker-tiny'
+        allBtn.textContent = window.spidT ? spidT('messages.select_all') : 'All'
+        var noneBtn = document.createElement('button')
+        noneBtn.type = 'button'
+        noneBtn.className = 'ms-picker-tiny'
+        noneBtn.textContent = window.spidT ? spidT('messages.select_none') : 'None'
+        actions.appendChild(allBtn)
+        actions.appendChild(noneBtn)
         head.appendChild(title)
+        head.appendChild(actions)
         section.appendChild(head)
 
         var memberBoxes = []
@@ -3008,16 +3025,14 @@ function msLoadContacts() {
           row.appendChild(txt)
           section.appendChild(row)
           memberBoxes.push(cb)
-          cb.addEventListener('change', function () {
-            var checked = memberBoxes.filter(function (x) { return x.checked }).length
-            all.checked = checked === memberBoxes.length && memberBoxes.length > 0
-            all.indeterminate = checked > 0 && checked < memberBoxes.length
-            msPickerSummary()
-          })
+          cb.addEventListener('change', msPickerSummary)
         })
-        all.addEventListener('change', function () {
-          memberBoxes.forEach(function (cb) { cb.checked = all.checked })
-          all.indeterminate = false
+        allBtn.addEventListener('click', function () {
+          memberBoxes.forEach(function (cb) { cb.checked = true })
+          msPickerSummary()
+        })
+        noneBtn.addEventListener('click', function () {
+          memberBoxes.forEach(function (cb) { cb.checked = false })
           msPickerSummary()
         })
         msToSel.appendChild(section)
@@ -3080,7 +3095,7 @@ function msSend() {
   var body = (msBody.value || '').trim()
   var recips = msToSel
     ? Array.prototype.slice.call(
-        msToSel.querySelectorAll('input[type="checkbox"]:checked:not(.ms-picker-all-box)')
+        msToSel.querySelectorAll('input[type="checkbox"]:checked')
       ).map(function (cb) { return cb.value })
     : []
   recips = recips.filter(function (v, i, a) { return !!v && a.indexOf(v) === i })
