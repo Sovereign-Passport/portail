@@ -203,7 +203,9 @@ window.SPID_I18N_CATALOG = {
     "assist.record": "Record",
     "assist.stop": "Stop",
     "messages.select_all": "All",
-    "messages.select_none": "None"
+    "messages.select_none": "None",
+    "common.share": "Share",
+    "relations.qr_too_large": "QR unavailable: signed invitation too large. Use the link, email or SMS."
   },
   "fr": {
     "ui.0": "Passeport Souverain",
@@ -408,7 +410,9 @@ window.SPID_I18N_CATALOG = {
     "assist.record": "Enregistrer",
     "assist.stop": "Arrêter",
     "messages.select_all": "Tout",
-    "messages.select_none": "Aucun"
+    "messages.select_none": "Aucun",
+    "common.share": "Partager",
+    "relations.qr_too_large": "QR indisponible : invitation signée trop volumineuse. Utilisez le lien, l’email ou le SMS."
   },
   "es": {
     "ui.0": "Pasaporte Soberano",
@@ -613,6 +617,8 @@ window.SPID_I18N_CATALOG = {
     "assist.record": "Grabar",
     "assist.stop": "Detener",
     "messages.select_all": "Todos",
-    "messages.select_none": "Ninguno"
+    "messages.select_none": "Ninguno",
+    "common.share": "Compartir",
+    "relations.qr_too_large": "QR no disponible: la invitación firmada es demasiado grande. Use el enlace, el correo o el SMS."
   }
 };

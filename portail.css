@@ -357,8 +357,6 @@ html.embed .panel { margin-bottom: 0; }
 
 .rel-share-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .rel-share-actions .btn { width: auto; margin: 0; text-decoration: none; }
-.rel-qr { margin-top: 10px; }
-.rel-qr img { display: block; width: 180px; max-width: 100%; background: #fff; padding: 6px; border-radius: 6px; }
 
 /* Messages — explicit community picker (not a fake select arrow). */
 .ms-picker {
@@ -430,6 +428,24 @@ html.embed .panel { margin-bottom: 0; }
   color: var(--text);
 }
 .ms-picker-row input { accent-color: var(--gold); }
+.rel-qr { margin-top: 10px; }
+.rel-qr-btn { border: 0; padding: 0; background: #fff; border-radius: 8px; cursor: zoom-in; }
+.rel-qr-btn svg { display: block; width: 180px; height: 180px; max-width: 100%; }
+.qr-overlay {
+  position: fixed; inset: 0; z-index: 300; background: rgba(8,11,18,0.94);
+  display: flex; align-items: center; justify-content: center; padding: 18px;
+}
+.qr-overlay-card {
+  position: relative; background: #fff; border-radius: 12px; padding: 14px;
+  width: min(92vw, 440px); max-height: 94vh; overflow: auto; text-align: center;
+}
+.qr-overlay-close {
+  position: absolute; top: 4px; right: 4px; width: 34px; height: 34px;
+  padding: 0; color: #111; background: #fff; border-color: #ccc;
+}
+.qr-overlay-svg svg { display: block; width: min(82vw, 380px); height: auto; max-height: 72vh; margin: 0 auto; }
+.qr-overlay-link { font-size: 10px; color: #333; word-break: break-all; margin-top: 10px; }
+
 .bb-status { font-size: 12.5px; color: var(--green); margin: 8px 0; }
 /* Pending indicator — a small spinner before the status text. */
 .bb-status.loading { color: var(--text-dim); }

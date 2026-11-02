@@ -3491,7 +3491,38 @@ function _relInviteLink(descriptor) {
   return 'https://sovereign-passport.github.io/passport/passport.html#invite=' + b64
 }
 
-function _relShowInvite(link, privateInvite) {
+function _relQrSvg(link) {
+  if (typeof qrcode !== 'function') throw new Error('Local QR encoder unavailable.')
+  var qr = qrcode(0, 'L')
+  qr.addData(link, 'Byte')
+  qr.make()
+  return qr.createSvgTag(4, 4, 'QR invitation', 'Invitation')
+}
+
+function _relOpenQr(svg, link) {
+  var old = document.getElementById('relQrOverlay')
+  if (old) old.remove()
+  var ov = document.createElement('div')
+  ov.id = 'relQrOverlay'
+  ov.className = 'qr-overlay'
+  ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove() })
+  var card = document.createElement('div')
+  card.className = 'qr-overlay-card'
+  var close = document.createElement('button')
+  close.type = 'button'; close.className = 'btn btn-ghost qr-overlay-close'
+  close.textContent = '✕'; close.setAttribute('aria-label', 'Fermer')
+  close.addEventListener('click', function () { ov.remove() })
+  var box = document.createElement('div')
+  box.className = 'qr-overlay-svg'
+  box.innerHTML = svg
+  var text = document.createElement('div')
+  text.className = 'qr-overlay-link'
+  text.textContent = link
+  card.appendChild(close); card.appendChild(box); card.appendChild(text)
+  ov.appendChild(card); document.body.appendChild(ov)
+}
+
+function _relShowInvite(link) {
   var wrap = document.getElementById('relLinkWrap')
   var input = document.getElementById('relLink')
   if (wrap && input) { input.value = link; wrap.style.display = 'block' }
@@ -3500,16 +3531,27 @@ function _relShowInvite(link, privateInvite) {
     '&body=' + encodeURIComponent(link)
   var sms = document.getElementById('relSms')
   if (sms) sms.href = 'sms:?body=' + encodeURIComponent(link)
+  var share = document.getElementById('relShare')
+  if (share) share.style.display = navigator.share ? 'inline-block' : 'none'
   var qr = document.getElementById('relQr')
   if (qr) {
     qr.innerHTML = ''
-    // A private invitation contains founder proofs: never send it to a
-    // third-party QR renderer. Link/email/SMS remain available.
-    if (!privateInvite) {
-      var img = document.createElement('img')
-      img.alt = 'QR invitation'
-      img.src = SPID_BOOTSTRAP_HOST + '/api/qr.svg?text=' + encodeURIComponent(link)
-      qr.appendChild(img)
+    try {
+      var svg = _relQrSvg(link)
+      var btn = document.createElement('button')
+      btn.type = 'button'; btn.className = 'rel-qr-btn'
+      btn.title = 'Agrandir le QR'
+      btn.setAttribute('aria-label', 'Agrandir le QR')
+      btn.innerHTML = svg
+      btn.addEventListener('click', function () { _relOpenQr(svg, link) })
+      qr.appendChild(btn)
+    } catch (e) {
+      // Never truncate or alter the signed invitation. Keep every other
+      // delivery channel available and explain the QR limitation.
+      var note = document.createElement('p')
+      note.className = 'bb-note'
+      note.textContent = window.spidT ? spidT('relations.qr_too_large') : 'QR indisponible. Utilisez le lien, l’email ou le SMS.'
+      qr.appendChild(note)
     }
   }
 }
@@ -3557,7 +3599,7 @@ function relInvite() {
         descriptor.founder_proof = proof
       }
       var link = _relInviteLink(descriptor)
-      _relShowInvite(link, privateCluster)
+      _relShowInvite(link)
       if (toDid) {
         _selfSignedBody('messages', 'send', {
           to_did: toDid,
@@ -3595,5 +3637,12 @@ function relRevoke(kind, id) {
     if (!link || !link.value) return
     try { navigator.clipboard.writeText(link.value); relSetStatus('Lien copié ✓') }
     catch (e) { link.select(); relSetStatus('Sélectionne et copie le lien.') }
+  })
+  var share = document.getElementById('relShare')
+  if (share) share.addEventListener('click', function () {
+    var link = document.getElementById('relLink')
+    if (!link || !link.value || !navigator.share) return
+    navigator.share({ title: 'Invitation SPID', text: 'Invitation Sovereign Passport', url: link.value })
+      .catch(function () {})
   })
 })()

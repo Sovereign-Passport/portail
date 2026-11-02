@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign Passport — Universal Switchboard</title>
-<link rel="stylesheet" href="portail.css?v=16">
+<link rel="stylesheet" href="portail.css?v=17">
 </head>
 <body>
 
@@ -247,6 +247,7 @@
           <div class="rel-share-actions">
             <a id="relEmail" class="btn btn-ghost" href="#" data-i18n="common.email">Email</a>
             <a id="relSms" class="btn btn-ghost" href="#" data-i18n="common.message">Message</a>
+            <button id="relShare" class="btn btn-ghost" type="button" style="display:none;" data-i18n="common.share">Partager</button>
           </div>
           <div id="relQr" class="rel-qr"></div>
         </div>
@@ -263,6 +264,7 @@
 <script type="module" src="relations-client.js?v=2"></script>
 <script src="i18n/catalogs.js?v=3"></script>
 <script src="spid.i18n.js?v=4"></script>
-<script src="portail.js?v=42"></script>
+<script src="vendor/qrcode-generator.js?v=1"></script>
+<script src="portail.js?v=43"></script>
 </body>
 </html>
