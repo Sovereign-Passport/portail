@@ -3268,14 +3268,17 @@ function relActive(r) {
 function relRender(d, C) {
   var rows = []
   ;(d.relations.vines || []).forEach(function (v) {
-    rows.push({ kind: 'vine', id: v.id, name: v.name, status: v.status, role: v.role })
+    rows.push({ kind: 'vine', id: v.id, name: v.name, status: v.status, role: v.role,
+                endpoint: v.endpoint || null })
   })
   ;(d.relations.clusters || []).forEach(function (c) {
     rows.push({ kind: 'cluster', id: c.id, name: c.name, status: c.status,
-                is_issuer: c.is_issuer, cluster_status: c.cluster_status })
+                is_issuer: c.is_issuer, cluster_status: c.cluster_status,
+                endpoint: c.vine_endpoint || null })
   })
   ;(d.relations.vignards || []).forEach(function (g) {
-    rows.push({ kind: 'vignard', id: g.id, name: g.name, status: g.status, role: g.role })
+    rows.push({ kind: 'vignard', id: g.id, name: g.name, status: g.status, role: g.role,
+                endpoint: null })
   })
 
   // "Mes liens" = active relations only. Revoked/deleted/left links are kept
@@ -3296,6 +3299,9 @@ function relRender(d, C) {
     var o = document.createElement('option')
     o.value = r.kind + '|' + r.id
     o.textContent = (r.name || r.id) + ' · ' + _relKindLabel(r.kind)
+    o.dataset.endpoint = r.endpoint || ''
+    o.dataset.status = r.status || ''
+    o.dataset.role = r.role || ''
     relScope.appendChild(o)
   })
   if (previousScope) relScope.value = previousScope
@@ -3468,71 +3474,100 @@ function relDecide(target, subject, previous, status) {
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
-function relInvite() {
-  var C = _relContract()
-  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
-  var sel = relScope.value
-  if (!sel) { relSetStatus('Choisis une portée.'); return }
-  var parts = sel.split('|')
-  var kind = parts[0], id = parts.slice(1).join('|')
-  var target
-  try { target = C.normalizeScope({ type: kind, id: id }) }
-  catch (e) { relSetStatus('Portée invalide.'); return }
-  var to = (relTo.value || '').trim()
-  var handle = (relHandle.value || '').trim() || null
-  if (!/^did:/.test(to)) {
-    var opt = relScope.options[relScope.selectedIndex]
-    var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : null
-    var payload = { scope: target, name: targetName, anchor: SPID_BOOTSTRAP_HOST,
-                    requested: ['handle'], handle: handle }
-    var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-    var link = 'https://sovereign-passport.github.io/passport/passport.html#invite=' + b64
-    var wrap = document.getElementById('relLinkWrap')
-    var input = document.getElementById('relLink')
-    if (wrap && input) { input.value = link; wrap.style.display = 'block' }
-    var email = document.getElementById('relEmail')
-    if (email) {
-      email.href = 'mailto:?subject=' + encodeURIComponent('Invitation SPID') +
-        '&body=' + encodeURIComponent(link)
-    }
-    var sms = document.getElementById('relSms')
-    if (sms) {
-      sms.href = 'sms:?body=' + encodeURIComponent(link)
-    }
-    var qr = document.getElementById('relQr')
-    if (qr) {
-      qr.innerHTML = ''
+function _relFounderProof(clusterId) {
+  var did = _holderDid()
+  var c = ((_unlockedVault && _unlockedVault.credentials) || []).find(function (x) {
+    return x && x.cluster_id === clusterId && x.type === 'FounderCredential' &&
+      x.issuer_did === did && x.claims && x.claims.role === 'founder' && x.signature
+  })
+  if (!c) return null
+  return { type: 'FounderCredential', issuer_did: c.issuer_did,
+           subject: c.subject || c.issuer_did, claims: c.claims, signature: c.signature }
+}
+
+function _relInviteLink(descriptor) {
+  var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(descriptor))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return 'https://sovereign-passport.github.io/passport/passport.html#invite=' + b64
+}
+
+function _relShowInvite(link, privateInvite) {
+  var wrap = document.getElementById('relLinkWrap')
+  var input = document.getElementById('relLink')
+  if (wrap && input) { input.value = link; wrap.style.display = 'block' }
+  var email = document.getElementById('relEmail')
+  if (email) email.href = 'mailto:?subject=' + encodeURIComponent('Invitation SPID') +
+    '&body=' + encodeURIComponent(link)
+  var sms = document.getElementById('relSms')
+  if (sms) sms.href = 'sms:?body=' + encodeURIComponent(link)
+  var qr = document.getElementById('relQr')
+  if (qr) {
+    qr.innerHTML = ''
+    // A private invitation contains founder proofs: never send it to a
+    // third-party QR renderer. Link/email/SMS remain available.
+    if (!privateInvite) {
       var img = document.createElement('img')
       img.alt = 'QR invitation'
       img.src = SPID_BOOTSTRAP_HOST + '/api/qr.svg?text=' + encodeURIComponent(link)
       qr.appendChild(img)
     }
-    relSetStatus('Lien et QR prêts — envoie-les à l’invité.')
-    return
   }
-  var linkWrap = document.getElementById('relLinkWrap')
-  if (linkWrap) linkWrap.style.display = 'none'
-  relInviteBtn.disabled = true
-  relSetStatus('Invitation…', true)
-  _relSelfCall('invite',
-    { to_did: to, handle: handle, requested: ['handle'] },
-    target, SPID_SWITCH_HOST)
-    .then(function (resp) { return resp.text().then(function (t) {
-      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-      relInviteBtn.disabled = false
-      relSetStatus('')
-      if (!resp.ok || !d || !d.ok) {
-        relSetStatus('Refusé : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
-        return
+}
+
+function relInvite() {
+  var C = _relContract()
+  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
+  if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
+  var sel = relScope.value
+  if (!sel) { relSetStatus(spidT('relations.scope_required')); return }
+  var parts = sel.split('|')
+  var kind = parts[0], id = parts.slice(1).join('|')
+  var target
+  try { target = C.normalizeScope({ type: kind, id: id }) }
+  catch (e) { relSetStatus(spidT('relations.scope_invalid')); return }
+  var opt = relScope.options[relScope.selectedIndex]
+  var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : target.id
+  var endpoint = opt && opt.dataset ? (opt.dataset.endpoint || null) : null
+  var to = (relTo.value || '').trim()
+  var toDid = /^did:/.test(to) ? to : null
+  var handle = (relHandle.value || '').trim() || null
+  var did = _holderDid()
+  var status = (opt && opt.dataset && opt.dataset.status) || 'unknown'
+  var privateCluster = target.type === 'cluster' && !endpoint
+
+  var payload = {
+    id: crypto.randomUUID(), type: 'ReferralCredential', from_did: did,
+    to_did: toDid, node_id: target.id, node_name: targetName, scope: target.type,
+    from_status_at_time: status, weight: status === 'approved' ? 3 : 1,
+    disclosed: {}, note: null, created_at: new Date().toISOString(), expires_at: null,
+  }
+  if (handle) payload.disclosed.handle = handle
+  importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+    .then(function (signature) {
+      payload.signature = signature
+      var descriptor = {
+        scope: target, name: targetName,
+        anchor: privateCluster ? null : SPID_SWITCH_HOST,
+        requested: ['handle'], referral: payload,
       }
-      relSetStatus('Invité ✓ (' + d.relation + ')')
-      relLoad()
-    })})
-    .catch(function (e) {
-      relInviteBtn.disabled = false
-      relSetStatus('Erreur : ' + (e && e.message ? e.message : e))
+      if (privateCluster) {
+        var proof = _relFounderProof(target.id)
+        if (!proof) throw new Error('Founder proof unavailable for this private Cluster.')
+        descriptor.founder_proof = proof
+      }
+      var link = _relInviteLink(descriptor)
+      _relShowInvite(link, privateCluster)
+      if (toDid) {
+        _selfSignedBody('messages', 'send', {
+          to_did: toDid,
+          body: 'Invitation: ' + link,
+          route: { type: target.type, id: target.id },
+        }, _msScope(), SPID_SWITCH_HOST).catch(function () {})
+      }
+      relSetStatus('Invitation prête — lien, email et SMS disponibles.')
     })
+    .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
 function relRevoke(kind, id) {
