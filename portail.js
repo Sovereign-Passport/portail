@@ -3318,6 +3318,58 @@ function loadPortalRelations() {
     })
 }
 
+var _portalRelationsRefreshing = false
+var _portalRelationsLastRefresh = 0
+
+/**
+ * Refresh the one live relation projection and the visible relation/message
+ * surfaces. Triggered by focus/visibility so an invitation accepted in the
+ * Passport propagates here without a page reload.
+ */
+function refreshPortalRelations(force) {
+  if (!_unlockedVault) return Promise.resolve({ ok: false, error: 'LOCKED' })
+  if (_portalRelationsRefreshing) return Promise.resolve({ ok: false, error: 'BUSY' })
+  var now = Date.now()
+  if (!force && now - _portalRelationsLastRefresh < 1500) {
+    return Promise.resolve({ ok: false, error: 'THROTTLED' })
+  }
+  _portalRelationsLastRefresh = now
+  _portalRelationsRefreshing = true
+  return loadPortalRelations().then(function (r) {
+    _portalRelationsRefreshing = false
+    if (!r.ok) return r
+    var C = _relContract()
+    if (C && servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
+      _relLoaded = true
+      relRender({ relations: r.relations, grants: r.grants }, C)
+    }
+    if (servicePanels.messages && !servicePanels.messages.hasAttribute('hidden')) {
+      msLoadContacts()
+    }
+    return r
+  }).catch(function (e) {
+    _portalRelationsRefreshing = false
+    return { ok: false, error: (e && e.message) ? e.message : String(e) }
+  })
+}
+
+function _portalRefreshOnVisible() {
+  if (document.visibilityState === 'visible') refreshPortalRelations(false)
+}
+
+document.addEventListener('visibilitychange', _portalRefreshOnVisible)
+window.addEventListener('focus', _portalRefreshOnVisible)
+window.addEventListener('pageshow', _portalRefreshOnVisible)
+
+// While Relations is visible, re-confirm the projection periodically. This
+// keeps the inviter's list current when the invitee accepts on another device.
+setInterval(function () {
+  if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+  if (servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
+    refreshPortalRelations(true)
+  }
+}, 20000)
+
 function relLoad() {
   if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
   var C = _relContract()
@@ -3379,12 +3431,15 @@ function relRender(d, C) {
   placeholder.disabled = true
   relScope.appendChild(placeholder)
   var scopes = activeRows.filter(function (r) {
-    return r.status === 'approved' || r.status === 'admin' || r.is_issuer
+    return r.status === 'approved' || r.status === 'admin' ||
+      r.status === 'invited' || r.is_issuer
   })
   scopes.forEach(function (r) {
     var o = document.createElement('option')
     o.value = r.kind + '|' + r.id
-    o.textContent = (r.name || r.id) + ' · ' + _relKindLabel(r.kind)
+    var suffix = (r.status !== 'approved' && r.status !== 'admin' && !r.is_issuer)
+      ? ' · ' + _relStatusLabel(r.status) : ''
+    o.textContent = (r.name || r.id) + ' · ' + _relKindLabel(r.kind) + suffix
     o.dataset.endpoint = r.endpoint || ''
     o.dataset.status = r.status || ''
     o.dataset.role = r.role || ''
@@ -3471,6 +3526,12 @@ function relLoadMembers() {
   if (!_unlockedVault) { relNote(el, 'Ouvrez votre passport.'); return }
   var target = relMembers()
   if (!target) { relNote(el, 'Choisis une portée.'); return }
+  var selected = relScope.options[relScope.selectedIndex]
+  var selectedStatus = selected && selected.dataset ? (selected.dataset.status || '') : ''
+  if (selectedStatus === 'invited') {
+    relNote(el, window.spidT ? spidT('relations.pending_invite') : 'Invitation en attente d’approbation.')
+    return
+  }
   relNote(el, 'Chargement…')
   _relSelfCall('members', {}, target, SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
@@ -3577,6 +3638,40 @@ function _relInviteLink(descriptor) {
   return SPID_PUBLIC_APP_ORIGIN + '/passport/passport.html#invite=' + b64
 }
 
+/**
+ * Store the signed invitation descriptor behind a short-lived token served by
+ * the Switchboard. The QR then contains only a short URL; the descriptor is
+ * still verified by the Passport, never by the token store.
+ */
+function _relWithTimeout(promise, ms, fallback) {
+  return new Promise(function (resolve) {
+    var done = false
+    var timer = setTimeout(function () {
+      if (!done) { done = true; resolve(fallback) }
+    }, ms)
+    promise.then(function (value) {
+      if (!done) { done = true; clearTimeout(timer); resolve(value) }
+    }, function () {
+      if (!done) { done = true; clearTimeout(timer); resolve(fallback) }
+    })
+  })
+}
+
+function _relShortenInvite(descriptor) {
+  return fetch(SPID_SWITCH_HOST + '/api/switch?invite=1', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ descriptor: descriptor }),
+  }).then(function (resp) {
+    return resp.json().catch(function () { return null }).then(function (d) {
+      if (!resp.ok || !d || !d.token) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return SPID_SWITCH_HOST + '/api/switch?invite=' + encodeURIComponent(d.token)
+    })
+  })
+}
+
 function _relQrSvg(link) {
   if (typeof qrcode !== 'function') throw new Error('Local QR encoder unavailable.')
   var qr = qrcode(0, 'L')
@@ -3664,6 +3759,10 @@ function relInvite() {
   var handle = (relHandle.value || '').trim() || null
   var did = _holderDid()
   var status = (opt && opt.dataset && opt.dataset.status) || 'unknown'
+  if (status === 'invited') {
+    relSetStatus(window.spidT ? spidT('relations.pending_invite') : 'Invitation en attente d’approbation.')
+    return
+  }
   var privateCluster = target.type === 'cluster' && !endpoint
 
   var payload = {
@@ -3687,16 +3786,43 @@ function relInvite() {
         if (!proof) throw new Error('Founder proof unavailable for this private Cluster.')
         descriptor.founder_proof = proof
       }
-      var link = _relInviteLink(descriptor)
-      _relShowInvite(link)
-      if (toDid) {
-        _selfSignedBody('messages', 'send', {
-          to_did: toDid,
-          body: 'Invitation: ' + link,
-          route: { type: target.type, id: target.id },
-        }, _msScope(), SPID_SWITCH_HOST).catch(function () {})
-      }
-      relSetStatus('Invitation prête — lien, email et SMS disponibles.')
+      var longLink = _relInviteLink(descriptor)
+      _relShowInvite(longLink)
+
+      var shortPromise = _relWithTimeout(
+        _relShortenInvite(descriptor).catch(function () { return null }), 4000, null)
+
+      var registerPromise = (toDid && !privateCluster)
+        ? _relWithTimeout(_relSelfCall('invite', {
+            to_did: toDid,
+            handle: handle,
+            requested: ['handle'],
+          }, target, SPID_SWITCH_HOST).then(function (resp) {
+            return resp.json().catch(function () { return null }).then(function (d) {
+              return !!(resp.ok && d && d.ok)
+            })
+          }).catch(function () { return false }), 4000, false)
+        : Promise.resolve(false)
+
+      shortPromise.then(function (shortLink) {
+        var link = shortLink || longLink
+        if (shortLink) _relShowInvite(shortLink)
+        if (toDid) {
+          _selfSignedBody('messages', 'send', {
+            to_did: toDid,
+            body: 'Invitation: ' + link,
+            route: { type: target.type, id: target.id },
+          }, _msScope(), SPID_SWITCH_HOST).catch(function () {})
+        }
+        registerPromise.then(function (registered) {
+          if (registered) {
+            relSetStatus(window.spidT ? spidT('relations.invite_ready_registered') : 'Invitation prête — DID invitée ajoutée.')
+            relLoad()
+          } else {
+            relSetStatus(window.spidT ? spidT('relations.invite_ready') : 'Invitation prête — lien, email et SMS disponibles.')
+          }
+        })
+      })
     })
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
