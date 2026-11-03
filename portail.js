@@ -17,17 +17,11 @@
 // SECTION 1 — CRYPTO (identical to passport.crypto.js primitives)
 // ═════════════════════════════════════════════════════════════════════════
 
-// One artifact, two origins:
-// - served from GitHub Pages → the public bootstrap Vine and the network SB;
-// - served by a SPID node → that node is the same-origin Switchboard.
-// The origin never determines a scope: scope stays in the signed request.
+// The Portail is a public static app. The network Switchboard is a distinct
+// service; the Vine is neither the app origin nor the Switchboard.
 var SPID_PUBLIC_APP_ORIGIN = 'https://sovereign-passport.github.io'
-const SPID_SWITCH_HOST = /(^|\.)github\.io$/i.test(location.hostname)
-  ? 'https://sb.sovereign-passport.id'
-  : location.origin
-// Invitations must stay portable beyond the inviter's LAN. Their anchor is
-// the public network Switchboard; private Clusters use no anchor at all.
-const SPID_INVITE_ANCHOR = 'https://sb.sovereign-passport.id'
+const SPID_SWITCH_HOST = 'https://sb.sovereign-passport.id'
+const SPID_INVITE_ANCHOR = SPID_SWITCH_HOST
 var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
 var PBKDF2_ITER = 600000
 
