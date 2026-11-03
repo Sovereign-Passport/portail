@@ -5,10 +5,10 @@
  * Same-origin as the Passport PWA — reads the SAME IndexedDB vault.
  * Crypto primitives identical to passport.crypto.js. WebCrypto only.
  *
- * The Switchboard is network-wide (SPID_SWITCH_HOST). Vine-specific
- * addresses (SPID_BOOTSTRAP_HOST, credential/DID endpoints) remain for
- * their own services, invitations, synchronisation and DID documents.
- * The hostname never determines the scope; scope stays in the DID request.
+ * The Switchboard is network-wide (SPID_SWITCH_HOST). The public app origin
+ * remains the bootstrap/invitation origin; credential/DID endpoints remain
+ * Vine-specific. The hostname never determines the scope; scope stays in the
+ * DID request.
  *
  * ES2017 target. Forbidden: ?. ?? 0n 600_000 catch{} {...obj}
  */
@@ -17,10 +17,17 @@
 // SECTION 1 — CRYPTO (identical to passport.crypto.js primitives)
 // ═════════════════════════════════════════════════════════════════════════
 
-// Vine-specific address, retained for invitations, QR and DID/service metadata.
-// The network-wide Switchboard is SPID_SWITCH_HOST below.
-var SPID_BOOTSTRAP_HOST = 'https://mdusl.sovereign-passport.id'
-const SPID_SWITCH_HOST = 'https://sb.sovereign-passport.id'
+// One artifact, two origins:
+// - served from GitHub Pages → the public bootstrap Vine and the network SB;
+// - served by a SPID node → that node is the same-origin Switchboard.
+// The origin never determines a scope: scope stays in the signed request.
+var SPID_PUBLIC_APP_ORIGIN = 'https://sovereign-passport.github.io'
+const SPID_SWITCH_HOST = /(^|\.)github\.io$/i.test(location.hostname)
+  ? 'https://sb.sovereign-passport.id'
+  : location.origin
+// Invitations must stay portable beyond the inviter's LAN. Their anchor is
+// the public network Switchboard; private Clusters use no anchor at all.
+const SPID_INVITE_ANCHOR = 'https://sb.sovereign-passport.id'
 var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
 var PBKDF2_ITER = 600000
 
@@ -330,6 +337,11 @@ var _accessRights  = null
 // Derived AES-GCM vault key — held ONLY in memory to re-decrypt the latest
 // IndexedDB payload on a soft refresh. Never persisted anywhere.
 var _vaultKey      = null
+// Live relation projection shared by Relations, Messages scope and hosted
+// Cluster selectors. It is not written into the vault: the Passport owns the
+// persistent copy; the Portail only presents the current server view.
+var _portalRelations = null
+var _portalGrants    = []
 
 function showMsg(kind, text) {
   msgBox.className = 'msg show ' + kind
@@ -396,7 +408,11 @@ function handleAccessResponse(resp) {
 }
 
 function afterAccess() {
-  return bbPullAndImport().then(function() {
+  // One sequential refresh: the live relation projection first, then the
+  // owned-Cluster proof sync. No concurrent synchronisation layer.
+  return loadPortalRelations().then(function() {
+    return bbPullAndImport()
+  }).then(function() {
     updateBillboardComposer()
     assistInit()
     calendarReset()
@@ -608,10 +624,10 @@ function ownerProofFor(vault, clusterId, did) {
  * The displayed label is dynamic: "<cluster name> — <vine name>" when the
  * vine name is found by endpoint match, else "<cluster name> — My Cluster".
  */
-function buildClusterOptions(vault) {
+function buildClusterOptions(vault, relations) {
   var byId = {}
 
-  // Vine name by endpoint — dynamic, matched from vine credentials only.
+  // Vine name by endpoint — display only, never a relation source.
   var vineByHost = {}
   var creds = (vault && vault.credentials) || []
   creds.forEach(function(c) {
@@ -622,36 +638,56 @@ function buildClusterOptions(vault) {
     if (host && c.node_name && !vineByHost[host]) vineByHost[host] = c.node_name
   })
 
-  function add(clusterId, name, endpoint, status, credentialId, allowNoEndpoint, owned) {
+  function add(clusterId, name, endpoint, status, allowNoEndpoint, owned, localOnly) {
     if (!clusterId || !UUID_RE.test(clusterId)) return        // canonical UUID only
     if (status === 'revoked' || status === 'removed') return
     var host = bbEndpointHost(endpoint)
     var cur = byId[clusterId]
     if (cur) {
-      // Enrich an existing Cluster (name / credential / endpoint).
       if (!cur.name && name) cur.name = name
-      if (!cur.credential_id && credentialId) cur.credential_id = credentialId
       if (!cur.endpoint && host) cur.endpoint = host
       if (owned) cur.owned = true
+      if (localOnly) cur.local_only = true
       return
     }
-    if (!host && !allowNoEndpoint) return                     // joined Cluster without endpoint → ignore
+    if (!host && !allowNoEndpoint) return
     byId[clusterId] = {
       cluster_id: clusterId, name: name || null, endpoint: host || null,
-      status: status || 'unknown', credential_id: credentialId || null,
-      owned: !!owned,
+      status: status || 'unknown', owned: !!owned, local_only: !!localOnly,
     }
   }
 
+  // Sovereign Clusters founded by this Passport are always local, with or
+  // without a network relation.
   ;(vault.ownClusters || []).forEach(function(c) {
-    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', null, true, true)
+    add(c.id, c.name || c.cluster_name, c.vine_endpoint, c.status || 'active', true, true, false)
   })
+
+  // Joined Clusters come from the SAME relation projection as Relations and
+  // Messages. A credential never creates one.
+  var serverIds = {}
+  if (relations && Array.isArray(relations.clusters)) {
+    relations.clusters.forEach(function(c) {
+      if (!c || !c.id) return
+      if (c.cluster_status && c.cluster_status !== 'active') return
+      serverIds[c.id] = true
+      add(c.id, c.name, c.vine_endpoint, c.status, false, false, false)
+    })
+  }
+
+  // Local-only private Clusters (accepted with the founder proof) never exist
+  // in spid.db. Keep them visible; they simply have no hosted service.
   ;(vault.memberships || []).forEach(function(m) {
-    add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, null, false, false)
-  })
-  creds.forEach(function(c) {
-    if (c.type === 'MembershipCredential' && c.scope === 'cluster') {
-      add(c.cluster_id, c.cluster_name, c.vine_endpoint, c.status, c.id, false, false)
+    if (!m.cluster_id) return
+    if (serverIds[m.cluster_id]) return
+    if (m.local_private) {
+      add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status || 'approved', true, false, true)
+      return
+    }
+    // Offline fallback: if the relation projection is unavailable, keep the
+    // last known non-stale membership. Never use a credential as a relation.
+    if (!relations && !m.stale) {
+      add(m.cluster_id, m.node_name || m.cluster_name, m.vine_endpoint, m.status, false, false, true)
     }
   })
 
@@ -662,7 +698,6 @@ function buildClusterOptions(vault) {
     var vineName = vineByHost[o.endpoint] || null
     var clusterName = o.name || o.cluster_id
     o.label = clusterName + ' — ' + (vineName || 'My Cluster')
-    // Owned Clusters carry their exact owner proof (used for the owner sync).
     if (o.owned) o.ownerProof = ownerProofFor(vault, o.cluster_id, vaultDid)
     out.push(o)
   })
@@ -822,7 +857,7 @@ function renderBillboardPosts(posts) {
  */
 function bbOwnerReconcile(did) {
   if (!_unlockedVault || !_vaultKey) return Promise.resolve()
-  var proofs = buildClusterOptions(_unlockedVault)
+  var proofs = buildClusterOptions(_unlockedVault, _portalRelations)
     .filter(function(c) { return c.owned && c.ownerProof })
     .map(function(c) { return c.ownerProof })
 
@@ -1570,7 +1605,7 @@ function updateBillboardComposer() {
     return
   }
 
-  _bbClusters = buildClusterOptions(_unlockedVault)
+  _bbClusters = buildClusterOptions(_unlockedVault, _portalRelations)
   bbClusterField.style.display = 'block'
   bbRenderClusterSelect(clusterFromHash())
 
@@ -1626,10 +1661,11 @@ function bbSoftRefresh() {
   if (!selectedId) { var cur = bbSelectedCluster(); selectedId = cur ? cur.cluster_id : null }
 
   reloadVaultFromStorage()
+    .then(function() { return loadPortalRelations() })
     .then(function() { return bbPullAndImport() })
     .then(function() {
       // Rebuild Clusters + metadata from the (refreshed) Passport state.
-      _bbClusters = buildClusterOptions(_unlockedVault)
+      _bbClusters = buildClusterOptions(_unlockedVault, _portalRelations)
       bbClusterField.style.display = 'block'
       bbRenderClusterSelect(selectedId)
 
@@ -1964,7 +2000,7 @@ function _assistTargetForText(text) {
   if (!n) return null
   var clusters = (_bbClusters && _bbClusters.length)
     ? _bbClusters
-    : buildClusterOptions(_unlockedVault)
+    : buildClusterOptions(_unlockedVault, _portalRelations)
   var best = null
   ;(clusters || []).forEach(function (c) {
     if (!c || !c.cluster_id) return
@@ -2255,7 +2291,7 @@ function assistReadAllPosts() {
     .then(function (resp) { return resp.text() })
     .then(function (t) { var d = null; try { d = JSON.parse(t) } catch (e) { d = null }; return (d && d.posts) || [] })
     .catch(function () { return [] }))
-  buildClusterOptions(_unlockedVault).forEach(function (c) {
+  buildClusterOptions(_unlockedVault, _portalRelations).forEach(function (c) {
     jobs.push(assistClusterPosts(c))
   })
   return Promise.all(jobs).then(function (lists) {
@@ -2680,9 +2716,12 @@ function _calScopes() {
   if (did) {
     out.push({ type: 'did', id: did, host: SPID_SWITCH_HOST, label: 'Personnel', color: CAL_PALETTE[0] })
   }
-  var clusters = buildClusterOptions(_unlockedVault)
+  var clusters = buildClusterOptions(_unlockedVault, _portalRelations)
   for (var i = 0; i < clusters.length; i++) {
     var c = clusters[i]
+    // A local-only private Cluster has no server scope; it stays in the
+    // Passport, not in a Switchboard calendar call.
+    if (c.local_only) continue
     // All scopes use the network-wide Switchboard.
     var host = SPID_SWITCH_HOST
     out.push({
@@ -3226,23 +3265,40 @@ function _relSelfCall(action, data, scope, host) {
   return _selfSignedBody('relation', action, data, scope, host)
 }
 
+/**
+ * Load the one live relation projection used by Relations, Messages (through
+ * messages/contacts) and the joined-Cluster selectors. Returns the cached
+ * object after a successful call; never invents a relation.
+ */
+function loadPortalRelations() {
+  if (!_unlockedVault) return Promise.resolve({ ok: false, error: 'LOCKED' })
+  return _relSelfCall('list', {}, _msScope(), SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.relations) {
+        return { ok: false, status: resp.status,
+                 error: (d && (d.error || d.message)) || ('HTTP ' + resp.status) }
+      }
+      _portalRelations = d.relations
+      _portalGrants    = d.grants || []
+      return { ok: true, relations: _portalRelations, grants: _portalGrants }
+    })})
+    .catch(function (e) {
+      return { ok: false, error: (e && e.message) ? e.message : String(e) }
+    })
+}
+
 function relLoad() {
   if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
   var C = _relContract()
   if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
   relSetStatus('Chargement…', true)
-  _relSelfCall('list', {}, _msScope(), SPID_SWITCH_HOST)
-    .then(function (resp) { return resp.text().then(function (t) {
-      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-      relSetStatus('')
-      if (!resp.ok || !d || !d.relations) {
-        relSetStatus('Indisponible : ' + ((d && (d.error || d.message)) || ('HTTP ' + resp.status)))
-        return
-      }
-      _relLoaded = true
-      relRender(d, C)
-    })})
-    .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
+  loadPortalRelations().then(function (r) {
+    relSetStatus('')
+    if (!r.ok) { relSetStatus('Indisponible : ' + (r.error || 'réseau')); return }
+    _relLoaded = true
+    relRender({ relations: r.relations, grants: r.grants }, C)
+  })
 }
 
 function _relKindLabel(kind) {
@@ -3488,7 +3544,7 @@ function _relFounderProof(clusterId) {
 function _relInviteLink(descriptor) {
   var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(descriptor))))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  return 'https://sovereign-passport.github.io/passport/passport.html#invite=' + b64
+  return SPID_PUBLIC_APP_ORIGIN + '/passport/passport.html#invite=' + b64
 }
 
 function _relQrSvg(link) {
@@ -3590,7 +3646,7 @@ function relInvite() {
       payload.signature = signature
       var descriptor = {
         scope: target, name: targetName,
-        anchor: privateCluster ? null : SPID_SWITCH_HOST,
+        anchor: privateCluster ? null : SPID_INVITE_ANCHOR,
         requested: ['handle'], referral: payload,
       }
       if (privateCluster) {
