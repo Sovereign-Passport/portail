@@ -1827,8 +1827,17 @@ try {
   }
 } catch (err) {}
 
-// Fragment absent or invalid → Assist.
-activateService(serviceFromHash())
+// On an explicit navigation the #service fragment is honoured.
+// On a reload, return to Assist/unlock instead of restoring the last tab.
+var _navEntry = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null
+var _isReload = (_navEntry && _navEntry.type === 'reload') ||
+  (performance.navigation && performance.navigation.type === 1)
+if (_isReload) {
+  try { history.replaceState(null, '', location.pathname + location.search) } catch (err) {}
+  activateService('assist')
+} else {
+  activateService(serviceFromHash())
+}
 
 // ═════════════════════════════════════════════════════════════════════════
 // SECTION 6 — ASSIST (chat + voice)
@@ -3009,6 +3018,20 @@ function msLoadContacts() {
     .then(function (resp) { return resp.text() }).then(function (t) {
       var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
       var groups = (d && d.groups) || []
+
+      // The server projection covers every Vine/Cluster/Vignard relation.
+      // Owned and private local Clusters may not exist server-side: add them
+      // so every scope is visible, even with no other member.
+      var seenGroups = {}
+      groups.forEach(function (g) { seenGroups[g.type + '|' + g.id] = true })
+      if (_unlockedVault) {
+        buildClusterOptions(_unlockedVault, _portalRelations).forEach(function (c) {
+          var key = 'cluster|' + c.cluster_id
+          if (!c.cluster_id || seenGroups[key]) return
+          seenGroups[key] = true
+          groups.push({ type: 'cluster', id: c.cluster_id, name: c.name || c.cluster_id, members: [], local_only: !!c.local_only })
+        })
+      }
       var list = (d && d.contacts) || []
       msToSel.innerHTML = ''
       var summary = document.getElementById('msPickerSummary')
@@ -3028,9 +3051,13 @@ function msLoadContacts() {
         var head = document.createElement('div')
         head.className = 'ms-picker-group'
         var title = document.createElement('span')
-        title.textContent = (g.type === 'vine' ? 'Vine — ' : g.type === 'cluster' ? 'Cluster — ' : '') + (g.name || g.id)
+        var prefix = g.type === 'vine' ? 'Vine — '
+          : g.type === 'cluster' ? 'Cluster — '
+          : g.type === 'vignard' ? 'Vignard — ' : ''
+        title.textContent = prefix + (g.name || g.id)
         var actions = document.createElement('span')
         actions.className = 'ms-picker-group-actions'
+        if (!g.members || !g.members.length) actions.style.display = 'none'
         var allBtn = document.createElement('button')
         allBtn.type = 'button'
         allBtn.className = 'ms-picker-tiny'
@@ -3044,6 +3071,15 @@ function msLoadContacts() {
         head.appendChild(title)
         head.appendChild(actions)
         section.appendChild(head)
+
+        if (!g.members || !g.members.length) {
+          var empty = document.createElement('p')
+          empty.className = 'bb-note'
+          empty.textContent = 'Aucun autre membre dans ce scope.'
+          section.appendChild(empty)
+          msToSel.appendChild(section)
+          return
+        }
 
         var memberBoxes = []
         g.members.forEach(function (c) {
@@ -3604,6 +3640,9 @@ function _relShowInvite(link) {
       qr.appendChild(note)
     }
   }
+  requestAnimationFrame(function () {
+    if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
 }
 
 function relInvite() {
