@@ -614,7 +614,8 @@ function ownerProofFor(vault, clusterId, did) {
 /**
  * Build the Cluster list from canonical sources, merged ONLY by cluster_id
  * (UUID). Ignores Vines/Vignards, legacy memberships without cluster_id,
- * Clusters without a usable endpoint, and revoked/removed memberships.
+ * and revoked/removed memberships. A Cluster without a Vine endpoint stays
+ * visible: the network Switchboard still routes its scoped services.
  * The displayed label is dynamic: "<cluster name> — <vine name>" when the
  * vine name is found by endpoint match, else "<cluster name> — My Cluster".
  */
@@ -665,7 +666,9 @@ function buildClusterOptions(vault, relations) {
       if (!c || !c.id) return
       if (c.cluster_status && c.cluster_status !== 'active') return
       serverIds[c.id] = true
-      add(c.id, c.name, c.vine_endpoint, c.status, false, false, false)
+      // Endpoint is display/hosting metadata, not an access condition. The
+      // actual service call always goes through the network Switchboard.
+      add(c.id, c.name, c.vine_endpoint, c.status, true, false, false)
     })
   }
 
@@ -3623,16 +3626,6 @@ function relDecide(target, subject, previous, status) {
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
-function _relFounderProof(clusterId) {
-  var did = _holderDid()
-  var c = ((_unlockedVault && _unlockedVault.credentials) || []).find(function (x) {
-    return x && x.cluster_id === clusterId && x.type === 'FounderCredential' &&
-      x.issuer_did === did && x.claims && x.claims.role === 'founder' && x.signature
-  })
-  if (!c) return null
-  return { type: 'FounderCredential', issuer_did: c.issuer_did,
-           subject: c.subject || c.issuer_did, claims: c.claims, signature: c.signature }
-}
 
 function _relInviteLink(descriptor) {
   var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(descriptor))))
@@ -3755,7 +3748,6 @@ function relInvite() {
   catch (e) { relSetStatus(spidT('relations.scope_invalid')); return }
   var opt = relScope.options[relScope.selectedIndex]
   var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : target.id
-  var endpoint = opt && opt.dataset ? (opt.dataset.endpoint || null) : null
   var to = (relTo.value || '').trim()
   var toDid = /^did:/.test(to) ? to : null
   var handle = (relHandle.value || '').trim() || null
@@ -3765,8 +3757,6 @@ function relInvite() {
     relSetStatus(window.spidT ? spidT('relations.pending_invite') : 'Invitation en attente d’approbation.')
     return
   }
-  var privateCluster = target.type === 'cluster' && !endpoint
-
   var payload = {
     id: crypto.randomUUID(), type: 'ReferralCredential', from_did: did,
     to_did: toDid, node_id: target.id, node_name: targetName, scope: target.type,
@@ -3780,13 +3770,8 @@ function relInvite() {
       payload.signature = signature
       var descriptor = {
         scope: target, name: targetName,
-        anchor: privateCluster ? null : SPID_INVITE_ANCHOR,
+        anchor: SPID_INVITE_ANCHOR,
         requested: ['handle'], referral: payload,
-      }
-      if (privateCluster) {
-        var proof = _relFounderProof(target.id)
-        if (!proof) throw new Error('Founder proof unavailable for this private Cluster.')
-        descriptor.founder_proof = proof
       }
       var longLink = _relInviteLink(descriptor)
       _relShowInvite(longLink)
@@ -3794,7 +3779,7 @@ function relInvite() {
       var shortPromise = _relWithTimeout(
         _relShortenInvite(descriptor).catch(function () { return null }), 4000, null)
 
-      var registerPromise = (toDid && !privateCluster)
+      var registerPromise = toDid
         ? _relWithTimeout(_relSelfCall('invite', {
             to_did: toDid,
             handle: handle,
