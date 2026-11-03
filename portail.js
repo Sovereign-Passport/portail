@@ -3382,6 +3382,19 @@ function _relStatusLabel(status) {
   return out === 'relations.status.' + status ? status : out
 }
 
+/**
+ * Cluster relations speak member/admin/pending. approved/invited are
+ * membership statuses for Vines/Vignards, not the Cluster relation itself.
+ */
+function _relStatusLabelFor(kind, status, isIssuer) {
+  if (kind === 'cluster') {
+    if (status === 'approved') return _relStatusLabel(isIssuer ? 'admin' : 'member')
+    if (status === 'admin') return _relStatusLabel('admin')
+    if (status === 'invited') return _relStatusLabel('pending')
+  }
+  return _relStatusLabel(status)
+}
+
 function relActive(r) {
   if (r.kind === 'cluster') {
     return r.cluster_status !== 'revoked' &&
@@ -3425,7 +3438,7 @@ function relRender(d, C) {
     var o = document.createElement('option')
     o.value = r.kind + '|' + r.id
     var suffix = (r.status !== 'approved' && r.status !== 'admin' && !r.is_issuer)
-      ? ' · ' + _relStatusLabel(r.status) : ''
+      ? ' · ' + _relStatusLabelFor(r.kind, r.status, r.is_issuer) : ''
     o.textContent = (r.name || r.id) + ' · ' + _relKindLabel(r.kind) + suffix
     o.dataset.endpoint = r.endpoint || ''
     o.dataset.status = r.status || ''
@@ -3541,7 +3554,8 @@ function relRenderMembers(el, target, members) {
     var n = document.createElement('div'); n.className = 'bb-title'
     n.textContent = m.handle || 'Sans pseudo'
     var meta = document.createElement('div'); meta.className = 'bb-note'
-    meta.textContent = _relStatusLabel(m.status) + (m.is_issuer ? ' · ' + spidT('relations.issuer') : '')
+    meta.textContent = _relStatusLabelFor(target.type, m.status, m.is_issuer) +
+      (m.is_issuer ? ' · ' + spidT('relations.issuer') : '')
     left.appendChild(n); left.appendChild(meta); row.appendChild(left)
 
     var copy = document.createElement('button')
@@ -3608,6 +3622,17 @@ function relDecide(target, subject, previous, status) {
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
+
+function _relFounderProof(clusterId) {
+  var did = _holderDid()
+  var c = ((_unlockedVault && _unlockedVault.credentials) || []).find(function (x) {
+    return x && x.cluster_id === clusterId && x.type === 'FounderCredential' &&
+      x.issuer_did === did && x.claims && x.claims.role === 'founder' && x.signature
+  })
+  if (!c) return null
+  return { type: 'FounderCredential', issuer_did: c.issuer_did,
+           subject: c.subject || c.issuer_did, claims: c.claims, signature: c.signature }
+}
 
 function _relInviteLink(descriptor) {
   var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(descriptor))))
@@ -3697,6 +3722,7 @@ function relInvite() {
   catch (e) { relSetStatus(spidT('relations.scope_invalid')); return }
   var opt = relScope.options[relScope.selectedIndex]
   var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : target.id
+  var endpoint = opt && opt.dataset ? (opt.dataset.endpoint || null) : null
   var to = (relTo.value || '').trim()
   var toDid = /^did:/.test(to) ? to : null
   var handle = (relHandle.value || '').trim() || null
@@ -3706,6 +3732,10 @@ function relInvite() {
     relSetStatus(window.spidT ? spidT('relations.pending_invite') : 'Invitation en attente d’approbation.')
     return
   }
+  // A Cluster with no hosting Vine is a private/local Cluster. The founder
+  // invitation is authoritative: the invitee joins approved, without a second
+  // approval step. A hosted Cluster still uses relation/accept.
+  var privateCluster = target.type === 'cluster' && !endpoint
   var payload = {
     id: crypto.randomUUID(), type: 'ReferralCredential', from_did: did,
     to_did: toDid, node_id: target.id, node_name: targetName, scope: target.type,
@@ -3719,8 +3749,13 @@ function relInvite() {
       payload.signature = signature
       var descriptor = {
         scope: target, name: targetName,
-        anchor: SPID_INVITE_ANCHOR,
+        anchor: privateCluster ? null : SPID_INVITE_ANCHOR,
         requested: ['handle'], referral: payload,
+      }
+      if (privateCluster) {
+        var proof = _relFounderProof(target.id)
+        if (!proof) throw new Error('Founder proof unavailable for this private Cluster.')
+        descriptor.founder_proof = proof
       }
       var link = _relInviteLink(descriptor)
       _relShowInvite(link)
