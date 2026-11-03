@@ -671,8 +671,9 @@ function buildClusterOptions(vault, relations) {
     })
   }
 
-  // Local-only private Clusters (accepted with the founder proof) never exist
-  // in spid.db. Keep them visible; they simply have no hosted service.
+  // Legacy Clusters without a Switchboard scope (accepted with the founder
+  // proof) never exist in spid.db. Keep them visible as local history; they
+  // have no hosted service until a scope is registered.
   ;(vault.memberships || []).forEach(function(m) {
     if (!m.cluster_id) return
     if (serverIds[m.cluster_id]) return
@@ -2724,8 +2725,8 @@ function _calScopes() {
   var clusters = buildClusterOptions(_unlockedVault, _portalRelations)
   for (var i = 0; i < clusters.length; i++) {
     var c = clusters[i]
-    // A local-only private Cluster has no server scope; it stays in the
-    // Passport, not in a Switchboard calendar call.
+    // A Cluster without a Switchboard scope stays in the Passport, not in a
+    // Switchboard calendar call.
     if (c.local_only) continue
     // All scopes use the network-wide Switchboard.
     var host = SPID_SWITCH_HOST
