@@ -614,8 +614,7 @@ function ownerProofFor(vault, clusterId, did) {
 /**
  * Build the Cluster list from canonical sources, merged ONLY by cluster_id
  * (UUID). Ignores Vines/Vignards, legacy memberships without cluster_id,
- * and revoked/removed memberships. A Cluster without a Vine endpoint stays
- * visible: the network Switchboard still routes its scoped services.
+ * Clusters without a usable endpoint, and revoked/removed memberships.
  * The displayed label is dynamic: "<cluster name> — <vine name>" when the
  * vine name is found by endpoint match, else "<cluster name> — My Cluster".
  */
@@ -666,9 +665,7 @@ function buildClusterOptions(vault, relations) {
       if (!c || !c.id) return
       if (c.cluster_status && c.cluster_status !== 'active') return
       serverIds[c.id] = true
-      // Endpoint is display/hosting metadata, not an access condition. The
-      // actual service call always goes through the network Switchboard.
-      add(c.id, c.name, c.vine_endpoint, c.status, true, false, false)
+      add(c.id, c.name, c.vine_endpoint, c.status, false, false, false)
     })
   }
 
@@ -3633,39 +3630,6 @@ function _relInviteLink(descriptor) {
   return SPID_PUBLIC_APP_ORIGIN + '/passport/passport.html#invite=' + b64
 }
 
-/**
- * Store the signed invitation descriptor behind a short-lived token served by
- * the Switchboard. The QR then contains only a short URL; the descriptor is
- * still verified by the Passport, never by the token store.
- */
-function _relWithTimeout(promise, ms, fallback) {
-  return new Promise(function (resolve) {
-    var done = false
-    var timer = setTimeout(function () {
-      if (!done) { done = true; resolve(fallback) }
-    }, ms)
-    promise.then(function (value) {
-      if (!done) { done = true; clearTimeout(timer); resolve(value) }
-    }, function () {
-      if (!done) { done = true; clearTimeout(timer); resolve(fallback) }
-    })
-  })
-}
-
-function _relShortenInvite(descriptor) {
-  return fetch(SPID_SWITCH_HOST + '/api/switch?invite=1', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ descriptor: descriptor }),
-  }).then(function (resp) {
-    return resp.json().catch(function () { return null }).then(function (d) {
-      if (!resp.ok || !d || !d.token) {
-        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
-      }
-      return SPID_SWITCH_HOST + '/api/switch?invite=' + encodeURIComponent(d.token)
-    })
-  })
-}
 
 function _relQrSvg(link) {
   if (typeof qrcode !== 'function') throw new Error('Local QR encoder unavailable.')
@@ -3773,43 +3737,16 @@ function relInvite() {
         anchor: SPID_INVITE_ANCHOR,
         requested: ['handle'], referral: payload,
       }
-      var longLink = _relInviteLink(descriptor)
-      _relShowInvite(longLink)
-
-      var shortPromise = _relWithTimeout(
-        _relShortenInvite(descriptor).catch(function () { return null }), 4000, null)
-
-      var registerPromise = toDid
-        ? _relWithTimeout(_relSelfCall('invite', {
-            to_did: toDid,
-            handle: handle,
-            requested: ['handle'],
-          }, target, SPID_SWITCH_HOST).then(function (resp) {
-            return resp.json().catch(function () { return null }).then(function (d) {
-              return !!(resp.ok && d && d.ok)
-            })
-          }).catch(function () { return false }), 4000, false)
-        : Promise.resolve(false)
-
-      shortPromise.then(function (shortLink) {
-        var link = shortLink || longLink
-        if (shortLink) _relShowInvite(shortLink)
-        if (toDid) {
-          _selfSignedBody('messages', 'send', {
-            to_did: toDid,
-            body: 'Invitation: ' + link,
-            route: { type: target.type, id: target.id },
-          }, _msScope(), SPID_SWITCH_HOST).catch(function () {})
-        }
-        registerPromise.then(function (registered) {
-          if (registered) {
-            relSetStatus(window.spidT ? spidT('relations.invite_ready_registered') : 'Invitation prête — DID invitée ajoutée.')
-            relLoad()
-          } else {
-            relSetStatus(window.spidT ? spidT('relations.invite_ready') : 'Invitation prête — lien, email et SMS disponibles.')
-          }
-        })
-      })
+      var link = _relInviteLink(descriptor)
+      _relShowInvite(link)
+      if (toDid) {
+        _selfSignedBody('messages', 'send', {
+          to_did: toDid,
+          body: 'Invitation: ' + link,
+          route: { type: target.type, id: target.id },
+        }, _msScope(), SPID_SWITCH_HOST).catch(function () {})
+      }
+      relSetStatus(window.spidT ? spidT('relations.invite_ready') : 'Invitation prête — lien, email et SMS disponibles.')
     })
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
