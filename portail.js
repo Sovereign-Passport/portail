@@ -3260,7 +3260,7 @@ function relNote(el, text) {
 function relInit() {
   if (!_unlockedVault || !_relLoaded) { relLoad(); return }
   // Re-open the tab with the live projection, not the previous snapshot.
-  refreshPortalRelations(true)
+  refreshPortalRelations()
 }
 
 function _selfSignedBody(service, action, data, scope, _host) {
@@ -3321,21 +3321,15 @@ function loadPortalRelations() {
 }
 
 var _portalRelationsRefreshing = false
-var _portalRelationsLastRefresh = 0
 
 /**
  * Refresh the one live relation projection and the visible relation/message
  * surfaces. Triggered by focus/visibility so an invitation accepted in the
  * Passport propagates here without a page reload.
  */
-function refreshPortalRelations(force) {
+function refreshPortalRelations() {
   if (!_unlockedVault) return Promise.resolve({ ok: false, error: 'LOCKED' })
   if (_portalRelationsRefreshing) return Promise.resolve({ ok: false, error: 'BUSY' })
-  var now = Date.now()
-  if (!force && now - _portalRelationsLastRefresh < 1500) {
-    return Promise.resolve({ ok: false, error: 'THROTTLED' })
-  }
-  _portalRelationsLastRefresh = now
   _portalRelationsRefreshing = true
   return loadPortalRelations().then(function (r) {
     _portalRelationsRefreshing = false
@@ -3356,21 +3350,12 @@ function refreshPortalRelations(force) {
 }
 
 function _portalRefreshOnVisible() {
-  if (document.visibilityState === 'visible') refreshPortalRelations(false)
+  if (document.visibilityState === 'visible') refreshPortalRelations()
 }
 
 document.addEventListener('visibilitychange', _portalRefreshOnVisible)
 window.addEventListener('focus', _portalRefreshOnVisible)
 window.addEventListener('pageshow', _portalRefreshOnVisible)
-
-// While Relations is visible, re-confirm the projection periodically. This
-// keeps the inviter's list current when the invitee accepts on another device.
-setInterval(function () {
-  if (document.visibilityState !== 'visible') return
-  if (servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
-    refreshPortalRelations(true)
-  }
-}, 10000)
 
 function relLoad() {
   if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
