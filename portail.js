@@ -3359,14 +3359,37 @@ document.addEventListener('visibilitychange', _portalRefreshOnVisible)
 window.addEventListener('focus', _portalRefreshOnVisible)
 window.addEventListener('pageshow', _portalRefreshOnVisible)
 
+function _relScopeMessage(text) {
+  if (!relScope) return
+  relScope.innerHTML = ''
+  var o = document.createElement('option')
+  o.value = ''
+  o.disabled = true
+  o.selected = true
+  o.textContent = text
+  relScope.appendChild(o)
+}
+
 function relLoad() {
-  if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
+  if (!_unlockedVault) {
+    _relScopeMessage(window.spidT ? spidT('relations.no_passport') : 'Ouvrez votre passport.')
+    relSetStatus('Ouvrez votre passport.')
+    return
+  }
   var C = _relContract()
-  if (!C) { relSetStatus('Contrat Relations indisponible.'); return }
+  if (!C) {
+    _relScopeMessage(window.spidT ? spidT('relations.contract_unavailable') : 'Contrat Relations indisponible.')
+    relSetStatus('Contrat Relations indisponible.')
+    return
+  }
   relSetStatus('Chargement…', true)
   loadPortalRelations().then(function (r) {
     relSetStatus('')
-    if (!r.ok) { relSetStatus('Indisponible : ' + (r.error || 'réseau')); return }
+    if (!r.ok) {
+      _relScopeMessage(window.spidT ? spidT('relations.unavailable') : 'Indisponible')
+      relSetStatus('Indisponible : ' + (r.error || 'réseau'))
+      return
+    }
     _relLoaded = true
     relRender({ relations: r.relations, grants: r.grants }, C)
   })
