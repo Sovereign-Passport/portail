@@ -3075,7 +3075,7 @@ function msLoadContacts() {
         if (!g.members || !g.members.length) {
           var empty = document.createElement('p')
           empty.className = 'bb-note'
-          empty.textContent = 'Aucun autre membre dans ce scope.'
+          empty.textContent = window.spidT ? spidT('messages.no_other_member') : 'Aucun autre membre dans ce scope.'
           section.appendChild(empty)
           msToSel.appendChild(section)
           return
