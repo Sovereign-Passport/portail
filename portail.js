@@ -3258,7 +3258,9 @@ function relNote(el, text) {
 }
 
 function relInit() {
-  if (!_relLoaded) relLoad()
+  if (!_unlockedVault || !_relLoaded) { relLoad(); return }
+  // Re-open the tab with the live projection, not the previous snapshot.
+  refreshPortalRelations(true)
 }
 
 function _selfSignedBody(service, action, data, scope, _host) {
@@ -3364,11 +3366,11 @@ window.addEventListener('pageshow', _portalRefreshOnVisible)
 // While Relations is visible, re-confirm the projection periodically. This
 // keeps the inviter's list current when the invitee accepts on another device.
 setInterval(function () {
-  if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+  if (document.visibilityState !== 'visible') return
   if (servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
     refreshPortalRelations(true)
   }
-}, 20000)
+}, 10000)
 
 function relLoad() {
   if (!_unlockedVault) { relSetStatus('Ouvrez votre passport.'); return }
