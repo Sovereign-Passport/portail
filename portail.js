@@ -410,6 +410,7 @@ function afterAccess() {
     updateBillboardComposer()
     assistInit()
     calendarReset()
+    if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budgetInit()
     msUpdateDot()
   })
 }
@@ -1724,7 +1725,7 @@ updateBillboardComposer()
 // No secret, DID or authorization is ever accepted from the URL.
 // ═════════════════════════════════════════════════════════════════════════
 
-var SERVICES = ['assist', 'billboard', 'calendar', 'messages', 'relations']
+var SERVICES = ['assist', 'billboard', 'calendar', 'budget', 'messages', 'relations']
 var DEFAULT_SERVICE = 'assist'
 
 var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
@@ -1758,6 +1759,9 @@ function activateService(name) {
   }
   if (target === 'calendar') {
     calendarInit()
+  }
+  if (target === 'budget') {
+    budgetInit()
   }
   if (target === 'messages') {
     msInit()
@@ -1926,6 +1930,32 @@ function saveBudgetSnapshotToVault(snapshot, fileName, clusterId, version, hash)
     })
     return persistVault(next).then(function () { _storedPayload = next; return entry })
   })
+}
+
+/**
+ * Prepare the snapshot, save it in the vault, then commit DB reconciliation.
+ * The user confirmation is the plan/button confirmation before this call.
+ */
+function budgetReconcileAndSave(scope) {
+  return _assistSignedBody('budget', 'reconcile', {}, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok || !d.snapshot || !d.file_name || !d.version || !d.hash) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return saveBudgetSnapshotToVault(d.snapshot, d.file_name, scope.id, d.version, d.hash)
+        .then(function () {
+          return _assistSignedBody('budget', 'reconcile/commit',
+            { version: d.version, hash: d.hash }, scope, SPID_SWITCH_HOST)
+        })
+        .then(function (commitResp) { return commitResp.text().then(function (ct) {
+          var cd = null; try { cd = JSON.parse(ct) } catch (e) { cd = null }
+          if (!commitResp.ok || !cd || !cd.ok) {
+            throw new Error((cd && (cd.error || cd.message)) || ('commit HTTP ' + commitResp.status))
+          }
+          return d
+        })})
+    })})
 }
 
 var assistDivider = document.getElementById('assistDivider')
@@ -2246,18 +2276,8 @@ function assistConfirm(plan) {
   actions.forEach(function (a) {
     chain = chain.then(function () {
       if (a.service === 'budget' && a.action === 'reconcile') {
-        return _assistSignedBody('budget', 'reconcile', a.data || {}, sc, SPID_SWITCH_HOST)
-          .then(function (resp) { return resp.text().then(function (t) {
-            var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-            if (!resp.ok || !d || !d.ok || !d.snapshot || !d.file_name) {
-              var why = (d && (d.error || d.message)) || ('HTTP ' + resp.status)
-              results.push('budget/reconcile → REFUSÉ (' + why + ')')
-              return
-            }
-            return saveBudgetSnapshotToVault(d.snapshot, d.file_name, sc.id, d.version, d.hash)
-              .then(function () { results.push('budget/reconcile → OK · ' + d.file_name) })
-              .catch(function (e) { results.push('budget/reconcile → snapshot non sauvegardé (' + e.message + ')') })
-          })})
+        return budgetReconcileAndSave(sc)
+          .then(function (d) { results.push('budget/reconcile → OK · ' + d.file_name) })
           .catch(function (e) { results.push('budget/reconcile → erreur (' + e.message + ')') })
       }
       if (a.service === 'billboard' && a.action === 'checklist/update') {
@@ -3030,6 +3050,188 @@ if (calTodayBtn) calTodayBtn.addEventListener('click', calendarTodayGo)
 // The initial activateService() ran before these DOM refs existed — if the page
 // opened straight on the Calendar tab, render it now.
 if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 7b — BUDGET (Cluster scope, working ledger)
+// The server keeps the collaborative ledger; reconciliation is a versioned
+// JSON snapshot written to the founder's did:key vault.
+// ═════════════════════════════════════════════════════════════════════════
+
+var budgetScopeEl   = document.getElementById('budgetScope')
+var budgetSummaryEl = document.getElementById('budgetSummary')
+var budgetStatusEl  = document.getElementById('budgetStatus')
+var budgetRefreshBtn = document.getElementById('budgetRefreshBtn')
+var budgetReconcileBtn = document.getElementById('budgetReconcileBtn')
+
+function _budgetText(key, fallback) {
+  return window.spidT ? spidT(key) : fallback
+}
+function budgetSetStatus(text, loading) {
+  if (!budgetStatusEl) return
+  budgetStatusEl.textContent = text || ''
+  budgetStatusEl.style.display = text ? 'block' : 'none'
+  budgetStatusEl.classList.toggle('loading', !!loading)
+}
+function budgetMoney(cents, currency) {
+  try {
+    return new Intl.NumberFormat(_uiLang(), {
+      style: 'currency', currency: currency || 'CAD',
+    }).format(Number(cents || 0) / 100)
+  } catch (e) {
+    return String((Number(cents || 0) / 100).toFixed(2)) + ' ' + (currency || '')
+  }
+}
+function budgetNoScope(text) {
+  if (!budgetScopeEl) return
+  budgetScopeEl.innerHTML = ''
+  var o = document.createElement('option')
+  o.value = ''; o.disabled = true; o.selected = true; o.textContent = text
+  budgetScopeEl.appendChild(o)
+}
+function budgetInit() {
+  if (!_unlockedVault) {
+    budgetNoScope(_budgetText('budget.unlock', 'Ouvrez votre passport.'))
+    budgetSetStatus(_budgetText('budget.unlock', 'Ouvrez votre passport.'))
+    if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
+    return
+  }
+  budgetLoadScopes()
+}
+function budgetCurrentScope() {
+  return budgetScopeEl && budgetScopeEl.value ? { type: 'cluster', id: budgetScopeEl.value } : null
+}
+function budgetLoadScopes() {
+  if (!budgetScopeEl) return
+  var keep = budgetScopeEl.value
+  var serverIds = {}
+  ;((_portalRelations && _portalRelations.clusters) || []).forEach(function (c) {
+    if (c && c.id && (c.cluster_status || 'active') === 'active') serverIds[c.id] = true
+  })
+  var clusters = buildClusterOptions(_unlockedVault, _portalRelations).filter(function (c) {
+    // Budget is a Switchboard Cluster service: keep only scopes known by the
+    // current relation projection, even when the Cluster has no Vine endpoint.
+    return !c.local_only && !!serverIds[c.cluster_id]
+  })
+  budgetScopeEl.innerHTML = ''
+  if (!clusters.length) {
+    budgetNoScope(_budgetText('budget.no_scope', 'Aucun Cluster disponible.'))
+    budgetSetStatus(_budgetText('budget.no_scope', 'Aucun Cluster disponible.'))
+    if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
+    return
+  }
+  clusters.forEach(function (c) {
+    var o = document.createElement('option')
+    o.value = c.cluster_id
+    o.textContent = c.label || c.name || c.cluster_id
+    budgetScopeEl.appendChild(o)
+  })
+  if (keep) budgetScopeEl.value = keep
+  if (!budgetScopeEl.value) budgetScopeEl.value = clusters[0].cluster_id
+  budgetLoad()
+}
+function budgetLoad() {
+  var scope = budgetCurrentScope()
+  if (!scope || !_unlockedVault) return
+  budgetSetStatus(_budgetText('budget.loading', 'Chargement…'), true)
+  _selfSignedBody('budget', 'report/summary', {}, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      budgetSetStatus('')
+      budgetRenderSummary(d.summary || {})
+    })})
+    .catch(function (e) {
+      budgetSetStatus(_budgetText('budget.error', 'Budget indisponible : ') +
+        (e && e.message ? e.message : e))
+      if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
+    })
+}
+function budgetRenderSummary(summary) {
+  if (!budgetSummaryEl) return
+  budgetSummaryEl.innerHTML = ''
+  var byCurrency = summary.by_currency || []
+  var byCategory = summary.by_category || []
+  var byStatus = summary.by_status || []
+  if (!byCurrency.length && !byCategory.length) {
+    var empty = document.createElement('p')
+    empty.className = 'bb-empty'
+    empty.textContent = _budgetText('budget.no_data', 'Aucune donnée Budget.')
+    budgetSummaryEl.appendChild(empty)
+    return
+  }
+  var currencies = {}
+  byCurrency.forEach(function (r) {
+    var c = currencies[r.currency] || (currencies[r.currency] = { income: 0, expense: 0 })
+    if (r.kind === 'income') c.income += Number(r.amount_cents) || 0
+    if (r.kind === 'expense') c.expense += Number(r.amount_cents) || 0
+  })
+  Object.keys(currencies).sort().forEach(function (cur) {
+    var c = currencies[cur]
+    var card = document.createElement('div'); card.className = 'bb-post'
+    var title = document.createElement('div'); title.className = 'bb-title'
+    title.textContent = cur; card.appendChild(title)
+    var rows = [
+      [_budgetText('budget.income', 'Revenus'), c.income],
+      [_budgetText('budget.expense', 'Dépenses'), c.expense],
+      [_budgetText('budget.net', 'Net'), c.income - c.expense],
+    ]
+    rows.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'bb-row'
+      var label = document.createElement('span'); label.textContent = r[0]
+      var value = document.createElement('strong'); value.textContent = budgetMoney(r[1], cur)
+      row.appendChild(label); row.appendChild(value); card.appendChild(row)
+    })
+    budgetSummaryEl.appendChild(card)
+  })
+  if (byCategory.length) {
+    var card2 = document.createElement('div'); card2.className = 'bb-post'
+    var t2 = document.createElement('div'); t2.className = 'bb-title'
+    t2.textContent = _budgetText('budget.by_category', 'Par catégorie')
+    card2.appendChild(t2)
+    byCategory.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'bb-row'
+      var label = document.createElement('span')
+      label.textContent = (r.category_code || '—') + ' · ' +
+        (r.kind === 'income' ? _budgetText('budget.income', 'Revenus') : _budgetText('budget.expense', 'Dépenses'))
+      var value = document.createElement('strong')
+      value.textContent = budgetMoney(r.amount_cents, r.currency)
+      row.appendChild(label); row.appendChild(value); card2.appendChild(row)
+    })
+    budgetSummaryEl.appendChild(card2)
+  }
+  if (byStatus.length) {
+    var note = document.createElement('p'); note.className = 'bb-note'
+    note.textContent = _budgetText('budget.by_status', 'Par statut') + ' · ' +
+      byStatus.map(function (r) { return r.status + ':' + r.count }).join(' · ')
+    budgetSummaryEl.appendChild(note)
+  }
+}
+function budgetReconcile() {
+  var scope = budgetCurrentScope()
+  if (!scope) return
+  var msg = _budgetText('budget.confirm_reconcile',
+    'Créer un snapshot réconcilié dans votre vault ?')
+  if (typeof confirm === 'function' && !confirm(msg)) return
+  if (budgetReconcileBtn) budgetReconcileBtn.disabled = true
+  budgetSetStatus(_budgetText('budget.reconciling', 'Réconciliation…'), true)
+  budgetReconcileAndSave(scope)
+    .then(function (d) {
+      budgetSetStatus(_budgetText('budget.snapshot_saved', 'Snapshot sauvegardé : ') + d.file_name)
+      budgetLoad()
+    })
+    .catch(function (e) {
+      budgetSetStatus(_budgetText('budget.error', 'Budget indisponible : ') +
+        (e && e.message ? e.message : e))
+    })
+    .then(function () { if (budgetReconcileBtn) budgetReconcileBtn.disabled = false })
+}
+
+if (budgetRefreshBtn) budgetRefreshBtn.addEventListener('click', budgetLoadScopes)
+if (budgetReconcileBtn) budgetReconcileBtn.addEventListener('click', budgetReconcile)
+if (budgetScopeEl) budgetScopeEl.addEventListener('change', budgetLoad)
+if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budgetInit()
 
 // ═════════════════════════════════════════════════════════════════════════
 // SECTION 8 — MESSAGES (DID-centric)
