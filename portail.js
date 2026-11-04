@@ -3402,7 +3402,10 @@ function msRender(rows) {
     var el = document.createElement('div')
     el.className = 'ms-msg' + (_msBox === 'inbox' && m.status !== 'read' ? ' unread' : '')
     var peer = document.createElement('div'); peer.className = 'ms-peer'
-    peer.textContent = (_msBox === 'inbox' ? 'de ' : 'à ') + (_msBox === 'inbox' ? m.from_did : m.to_did)
+    var peerDid = _msBox === 'inbox' ? m.from_did : m.to_did
+    var peerHandle = _msBox === 'inbox' ? m.from_handle : m.to_handle
+    peer.textContent = (_msBox === 'inbox' ? 'de ' : 'à ') + (peerHandle || peerDid)
+    peer.title = peerDid || ''
     var body = document.createElement('div'); body.className = 'ms-body'; body.textContent = m.body
     var meta = document.createElement('div'); meta.className = 'ms-meta'
     var when = document.createElement('span')
@@ -3500,7 +3503,6 @@ var relGrants  = document.getElementById('relGrants')
 var _relGrants = []
 var relScope   = document.getElementById('relScope')
 var relTo      = document.getElementById('relTo')
-var relHandle  = document.getElementById('relHandle')
 var relInviteBtn = document.getElementById('relInviteBtn')
 var _relLoaded = false
 
@@ -4002,7 +4004,6 @@ function relInvite() {
   var targetName = opt ? opt.textContent.replace(/ · (cluster|vine|vignard)$/, '') : target.id
   var to = (relTo.value || '').trim()
   var toDid = /^did:/.test(to) ? to : null
-  var handle = (relHandle.value || '').trim() || null
   var did = _holderDid()
   var status = (opt && opt.dataset && opt.dataset.status) || 'unknown'
   if (status === 'invited') {
@@ -4015,7 +4016,6 @@ function relInvite() {
     from_status_at_time: status, weight: status === 'approved' ? 3 : 1,
     disclosed: {}, note: null, created_at: new Date().toISOString(), expires_at: null,
   }
-  if (handle) payload.disclosed.handle = handle
   importPrivateKey(_unlockedVault.keys.privateKey)
     .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
     .then(function (signature) {
