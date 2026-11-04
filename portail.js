@@ -2802,16 +2802,21 @@ function calendarLoad() {
   Promise.all(calls).then(function (rs) {
     _calLoading = false
     _calLoaded  = true
-    var merged = [], oks = 0
+    var byId = {}, oks = 0
     rs.forEach(function (r) {
       if (r.ok && r.data && Array.isArray(r.data.events)) {
         oks++
         r.data.events.forEach(function (e) {
-          merged.push({ id: e.id, title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, _scope: r.scope })
+          var ev = { id: e.id, title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, _scope: r.scope }
+          var prev = byId[e.id]
+          // A participant event appears in the personal projection and in the
+          // Cluster projection. Keep one copy, preferring the Cluster scope.
+          if (!prev || (prev._scope.type === 'did' && r.scope.type !== 'did')) byId[e.id] = ev
         })
       }
     })
-    _calEvents = merged
+    _calEvents = Object.keys(byId).map(function (k) { return byId[k] })
+      .sort(function (a, b) { return String(a.starts_at).localeCompare(String(b.starts_at)) })
     if (!oks && rs.length) {
       calendarEmpty('Calendrier indisponible (aucune portée n\'a répondu).')
       calendarRetry()
