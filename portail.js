@@ -1888,6 +1888,46 @@ function spidPersistLang(l) {
   }).catch(function () {})
 }
 
+/**
+ * Store a reconciled Budget snapshot as a new encrypted vault file.
+ * The snapshot is versioned by file name; the vault remains the sole owner.
+ */
+function saveBudgetSnapshotToVault(snapshot, fileName, clusterId, version, hash) {
+  if (!_unlockedVault || !_vaultKey || !_storedPayload || !_storedPayload.salt) {
+    return Promise.reject(new Error('vault locked or base payload missing'))
+  }
+  var vault = _unlockedVault
+  if (!vault.files) vault.files = []
+  var content = JSON.stringify(snapshot, null, 2)
+  if (content.length > 2 * 1024 * 1024) {
+    return Promise.reject(new Error('budget snapshot exceeds the 2 MB vault text limit'))
+  }
+  var entry = {
+    name: fileName,
+    path: fileName,
+    mime: 'application/json',
+    visibility: 'private',
+    date: new Date().toLocaleDateString('en-CA'),
+    size: `${Math.round(content.length / 1024 * 10) / 10}kb`,
+    content: content,
+    kind: 'budget-snapshot',
+    cluster_id: clusterId,
+    version: version,
+    hash: hash,
+  }
+  var idx = vault.files.findIndex(function (f) { return f && f.name === fileName })
+  if (idx >= 0) vault.files[idx] = entry
+  else vault.files.push(entry)
+
+  return encryptVault(_vaultKey, JSON.stringify(vault)).then(function (e) {
+    var next = Object.assign({}, _storedPayload, {
+      key: 'current', iv: e.iv, ciphertext: e.ciphertext,
+      did: vault.identity.id, updated_at: nowIso(),
+    })
+    return persistVault(next).then(function () { _storedPayload = next; return entry })
+  })
+}
+
 var assistDivider = document.getElementById('assistDivider')
 var assistField   = document.getElementById('assistField')
 var assistInput   = document.getElementById('assistInput')
@@ -2205,6 +2245,21 @@ function assistConfirm(plan) {
   var touchedChecklist = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
+      if (a.service === 'budget' && a.action === 'reconcile') {
+        return _assistSignedBody('budget', 'reconcile', a.data || {}, sc, SPID_SWITCH_HOST)
+          .then(function (resp) { return resp.text().then(function (t) {
+            var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+            if (!resp.ok || !d || !d.ok || !d.snapshot || !d.file_name) {
+              var why = (d && (d.error || d.message)) || ('HTTP ' + resp.status)
+              results.push('budget/reconcile → REFUSÉ (' + why + ')')
+              return
+            }
+            return saveBudgetSnapshotToVault(d.snapshot, d.file_name, sc.id, d.version, d.hash)
+              .then(function () { results.push('budget/reconcile → OK · ' + d.file_name) })
+              .catch(function (e) { results.push('budget/reconcile → snapshot non sauvegardé (' + e.message + ')') })
+          })})
+          .catch(function (e) { results.push('budget/reconcile → erreur (' + e.message + ')') })
+      }
       if (a.service === 'billboard' && a.action === 'checklist/update') {
         touchedChecklist = true
         return assistChecklistUpdate(a, sc, planHost)
