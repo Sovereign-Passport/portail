@@ -1847,7 +1847,7 @@ if (_isReload) {
 //
 // Text -> Switchboard 'assist/plan' (planner, no execution) -> clarification
 // or confirmation -> on confirm, the Passport signs EACH action through the
-// Switchboard (calendar/messages/finance/checklist). Nothing runs server-side.
+// Switchboard (calendar/messages/budget/checklist). Nothing runs server-side.
 // ═════════════════════════════════════════════════════════════════════════
 
 // UI language: localStorage override → browser preference → EN (default).
