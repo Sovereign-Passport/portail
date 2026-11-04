@@ -2273,8 +2273,10 @@ function assistConfirm(plan) {
   var results = []
   var touchedCalendar = false
   var touchedChecklist = false
+  var touchedBudget = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
+      if (a.service === 'budget') touchedBudget = true
       if (a.service === 'budget' && a.action === 'reconcile') {
         return budgetReconcileAndSave(sc)
           .then(function (d) { results.push('budget/reconcile → OK · ' + d.file_name) })
@@ -2331,6 +2333,9 @@ function assistConfirm(plan) {
       if (selected && selected.cluster_id === sc.id) {
         bbLoadChecklists({ cluster_id: sc.id }, SPID_SWITCH_HOST)
       }
+    }
+    if (touchedBudget && servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) {
+      budgetLoad()
     }
   })
 }
