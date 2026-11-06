@@ -7,13 +7,115 @@
  * Version is part of the contract. Client and server must refuse a mismatch.
  */
 
-export const RELATIONS_CONTRACT_VERSION = '1.0.1'
+export const RELATIONS_CONTRACT_VERSION = '1.1.0'
 
 export const RELATION_SCOPES  = Object.freeze(['did', 'cluster', 'vine', 'vignard'])
 export const RELATION_TARGET_SCOPES = Object.freeze(['cluster', 'vine', 'vignard'])
-export const RELATION_ACTIONS = Object.freeze(['list', 'members', 'invite', 'accept', 'decision', 'revoke'])
-export const SELF_SCOPED_ACTIONS = Object.freeze(['list', 'accept', 'revoke'])
+export const RELATION_ACTIONS = Object.freeze(['list', 'members', 'invite', 'accept', 'decision', 'revoke', 'share'])
+export const SELF_SCOPED_ACTIONS = Object.freeze(['list', 'accept', 'revoke', 'share'])
 export const RELATION_MIN_LEVEL = 'grape'
+
+/**
+ * Canonical sharing capabilities. A grant is an explicit list of these
+ * strings. Read and write are deliberately separate: a relationship that
+ * permits reading does not implicitly permit writing.
+ *
+ * Legacy profile capabilities (handle/icons/feedback/relations) stay valid so
+ * existing grants keep working while new grants use the same table.
+ */
+export const SHARE_TYPES = Object.freeze([
+  'handle',
+  'icons',
+  'feedback',
+  'relations',
+  'data:read',
+  'data:write',
+])
+
+export const SHARE_MAX_FUTURE_MS = 5 * 60 * 1000
+
+export function normalizeShareTypes(value) {
+  if (value == null) return []
+  if (!Array.isArray(value)) throw new Error('SHARE_TYPES_REQUIRED')
+  if (value.length > 50) throw new Error('TOO_MANY_SHARE_TYPES')
+  const out = []
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !raw) throw new Error('BAD_SHARE_TYPE')
+    if (!SHARE_TYPES.includes(raw)) throw new Error('BAD_SHARE_TYPE')
+    if (!out.includes(raw)) out.push(raw)
+  }
+  return out.sort()
+}
+
+/** True when accepted is a subset of requested (both canonicalised). */
+export function isShareSubset(accepted, requested) {
+  const a = normalizeShareTypes(accepted)
+  const r = normalizeShareTypes(requested)
+  return a.every((t) => r.includes(t))
+}
+
+/**
+ * The exact payload signed by the holder for a sharing grant.
+ * `signature` is never part of the payload.
+ */
+export function canonicalShareGrantPayload(g) {
+  if (!g || typeof g !== 'object') throw new Error('SHARE_GRANT_REQUIRED')
+  if (typeof g.holder_did !== 'string' || !g.holder_did.startsWith('did:')) {
+    throw new Error('HOLDER_DID_REQUIRED')
+  }
+  const scope = normalizeScope(g.scope)
+  if (!RELATION_TARGET_SCOPES.includes(scope.type)) throw new Error('BAD_SHARE_SCOPE')
+  const types = normalizeShareTypes(g.types)
+  if (!types.length) throw new Error('SHARE_TYPES_REQUIRED')
+  if (typeof g.issued_at !== 'string') throw new Error('BAD_ISSUED_AT')
+  const payload = {
+    type:       'ShareGrant',
+    holder_did: g.holder_did,
+    scope:      { type: scope.type, id: scope.id },
+    types:      types,
+    issued_at:  g.issued_at,
+  }
+  if (g.expires_at != null) payload.expires_at = g.expires_at
+  return payload
+}
+
+export function validateShareGrant(g, now = Date.now()) {
+  const payload = canonicalShareGrantPayload(g)
+  const issued = Date.parse(payload.issued_at)
+  if (!Number.isFinite(issued)) throw new Error('BAD_ISSUED_AT')
+  if (issued > now + SHARE_MAX_FUTURE_MS) throw new Error('ISSUED_IN_FUTURE')
+  if (payload.expires_at != null) {
+    const expires = Date.parse(payload.expires_at)
+    if (!Number.isFinite(expires)) throw new Error('BAD_EXPIRES_AT')
+    if (expires <= now) throw new Error('SHARE_EXPIRED')
+  }
+  return payload
+}
+
+/** The exact payload signed by the holder to revoke one scope's grant. */
+export function canonicalShareRevocationPayload(r) {
+  if (!r || typeof r !== 'object') throw new Error('SHARE_REVOCATION_REQUIRED')
+  if (typeof r.holder_did !== 'string' || !r.holder_did.startsWith('did:')) {
+    throw new Error('HOLDER_DID_REQUIRED')
+  }
+  const scope = normalizeScope(r.scope)
+  if (!RELATION_TARGET_SCOPES.includes(scope.type)) throw new Error('BAD_SHARE_SCOPE')
+  if (typeof r.issued_at !== 'string') throw new Error('BAD_ISSUED_AT')
+  return {
+    type:       'ShareRevocation',
+    holder_did: r.holder_did,
+    scope:      { type: scope.type, id: scope.id },
+    issued_at:  r.issued_at,
+  }
+}
+
+export function validateShareRevocation(r, now = Date.now()) {
+  const payload = canonicalShareRevocationPayload(r)
+  const issued = Date.parse(payload.issued_at)
+  if (!Number.isFinite(issued)) throw new Error('BAD_ISSUED_AT')
+  if (issued > now + SHARE_MAX_FUTURE_MS) throw new Error('ISSUED_IN_FUTURE')
+  return payload
+}
 
 export const ACCEPT_STATUS = Object.freeze({
   cluster: 'invited',

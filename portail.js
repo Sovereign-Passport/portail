@@ -477,6 +477,7 @@ unlockBtn.addEventListener('click', function() {
     .then(function(result) {
       _unlockedVault = result.vault
       _vaultKey      = result.vaultKey
+      if (!Array.isArray(_unlockedVault.shareGrants)) _unlockedVault.shareGrants = []
       try {
         var vlang = _unlockedVault.prefs && _unlockedVault.prefs.lang
         var llang = null
@@ -3505,6 +3506,8 @@ function msSyncBoxBtns() {
 
 var relStatus  = document.getElementById('relStatus')
 var relGrants  = document.getElementById('relGrants')
+var relShareEditor = document.getElementById('relShareEditor')
+var relRequestedEditor = document.getElementById('relRequestedEditor')
 var _relGrants = []
 var relScope   = document.getElementById('relScope')
 var relTo      = document.getElementById('relTo')
@@ -3513,6 +3516,123 @@ var _relLoaded = false
 
 function _relContract() {
   return (window.SPIDRelations && window.SPIDRelations.contract) || null
+}
+
+function _shareTypeLabel(type) {
+  var labels = {
+    handle: spidT('relations.share_handle'),
+    icons: spidT('relations.share_icons'),
+    feedback: spidT('relations.share_feedback'),
+    relations: spidT('relations.share_relations'),
+    'data:read': spidT('relations.share_data_read'),
+    'data:write': spidT('relations.share_data_write'),
+  }
+  return labels[type] || type
+}
+
+function _shareScopeKey(scope) {
+  if (!scope || !scope.type || !scope.id) return ''
+  return scope.type + '|' + scope.id
+}
+
+function _localShareGrant(scope) {
+  if (!_unlockedVault || !scope) return null
+  var key = _shareScopeKey(scope)
+  return (_unlockedVault.shareGrants || []).find(function (g) {
+    return g && g.scope && _shareScopeKey(g.scope) === key
+  }) || null
+}
+
+function _setLocalShareGrant(entry) {
+  if (!_unlockedVault || !entry || !entry.scope) return null
+  if (!Array.isArray(_unlockedVault.shareGrants)) _unlockedVault.shareGrants = []
+  var key = _shareScopeKey(entry.scope)
+  var idx = _unlockedVault.shareGrants.findIndex(function (g) {
+    return g && g.scope && _shareScopeKey(g.scope) === key
+  })
+  if (idx >= 0) _unlockedVault.shareGrants[idx] = entry
+  else _unlockedVault.shareGrants.push(entry)
+  return entry
+}
+
+function _persistLocalShares() {
+  if (!_unlockedVault || !_vaultKey || !_storedPayload) {
+    return Promise.reject(new Error('vault locked or base payload missing'))
+  }
+  return encryptVault(_vaultKey, JSON.stringify(_unlockedVault)).then(function (e) {
+    var next = Object.assign({}, _storedPayload, {
+      key: 'current', iv: e.iv, ciphertext: e.ciphertext,
+      did: _unlockedVault.identity.id, updated_at: nowIso(),
+    })
+    return persistVault(next).then(function () { _storedPayload = next })
+  })
+}
+
+function _signShareGrant(scope, types, expiresAt) {
+  var C = _relContract()
+  if (!C || typeof C.canonicalShareGrantPayload !== 'function') {
+    return Promise.reject(new Error('SHARE_CONTRACT_UNAVAILABLE'))
+  }
+  var payload = C.canonicalShareGrantPayload({
+    holder_did: _holderDid(),
+    scope: scope,
+    types: types,
+    issued_at: nowIso(),
+    expires_at: expiresAt || null,
+  })
+  return importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+    .then(function (signature) { return Object.assign({}, payload, { signature: signature }) })
+}
+
+function _signShareRevocation(scope) {
+  var C = _relContract()
+  if (!C || typeof C.canonicalShareRevocationPayload !== 'function') {
+    return Promise.reject(new Error('SHARE_CONTRACT_UNAVAILABLE'))
+  }
+  var payload = C.canonicalShareRevocationPayload({
+    holder_did: _holderDid(), scope: scope, issued_at: nowIso(),
+  })
+  return importPrivateKey(_unlockedVault.keys.privateKey)
+    .then(function (pk) { return edSign(pk, JSON.stringify(payload)) })
+    .then(function (signature) { return Object.assign({}, payload, { signature: signature }) })
+}
+
+/**
+ * Local signed grants win over the server projection. If the local vault has
+ * no choice yet, the server view remains visible as a legacy projection.
+ */
+function _scopeInPortalRelations(scope) {
+  if (!scope || !_portalRelations) return false
+  if (scope.type === 'cluster') {
+    return (_portalRelations.clusters || []).some(function (c) { return c.id === scope.id })
+  }
+  if (scope.type === 'vine') {
+    return (_portalRelations.vines || []).some(function (v) { return v.id === scope.id })
+  }
+  if (scope.type === 'vignard') {
+    return (_portalRelations.vignards || []).some(function (g) { return g.id === scope.id })
+  }
+  return false
+}
+
+function _displayGrantsFor(scope) {
+  var local = _localShareGrant(scope)
+  if (local) {
+    return [{
+      consumer_type: scope.type,
+      consumer_id: scope.id,
+      types: JSON.stringify(local.types || []),
+      granted_at: local.issued_at || null,
+      expires_at: local.expires_at || null,
+      revoked_at: local.revoked_at || null,
+      pendingSync: !!local.pendingSync,
+      local: true,
+    }]
+  }
+  return _relGrants.filter(function (g) {
+    return g.consumer_type === scope.type && g.consumer_id === scope.id
+  })
 }
 
 function relSetStatus(text, loading) {
@@ -3603,7 +3723,9 @@ function refreshPortalRelations() {
   if (!_unlockedVault) return Promise.resolve({ ok: false, error: 'LOCKED' })
   if (_portalRelationsRefreshing) return Promise.resolve({ ok: false, error: 'BUSY' })
   _portalRelationsRefreshing = true
-  return loadPortalRelations().then(function (r) {
+  return _flushPendingPortalShares().then(function () {
+    return loadPortalRelations()
+  }).then(function (r) {
     _portalRelationsRefreshing = false
     if (!r.ok) return r
     var C = _relContract()
@@ -3653,7 +3775,9 @@ function relLoad() {
     return
   }
   relSetStatus('Chargement…', true)
-  loadPortalRelations().then(function (r) {
+  _flushPendingPortalShares().then(function () {
+    return loadPortalRelations()
+  }).then(function (r) {
     relSetStatus('')
     if (!r.ok) {
       _relScopeMessage(window.spidT ? spidT('relations.unavailable') : 'Indisponible')
@@ -3699,6 +3823,7 @@ function relActive(r) {
 }
 
 function relRender(d, C) {
+  relRenderRequestedEditor()
   var rows = []
   ;(d.relations.vines || []).forEach(function (v) {
     rows.push({ kind: 'vine', id: v.id, name: v.name, status: v.status, role: v.role,
@@ -3712,6 +3837,19 @@ function relRender(d, C) {
   ;(d.relations.vignards || []).forEach(function (g) {
     rows.push({ kind: 'vignard', id: g.id, name: g.name, status: g.status, role: g.role,
                 endpoint: null })
+  })
+
+  // Sovereign clusters founded locally are valid scopes too. A Vine-less
+  // founder invitation has no Switchboard projection yet, but its signed
+  // ShareGrant still lives in the Passport vault.
+  ;((_unlockedVault && _unlockedVault.ownClusters) || []).forEach(function (c) {
+    if (!c || !c.id) return
+    if (rows.some(function (r) { return r.kind === 'cluster' && r.id === c.id })) return
+    rows.push({
+      kind: 'cluster', id: c.id, name: c.name, status: 'approved',
+      is_issuer: true, cluster_status: c.status || 'active',
+      endpoint: c.vine_endpoint || null, local: true,
+    })
   })
 
   // "Mes liens" = active relations only. Revoked/deleted/left links are kept
@@ -3761,7 +3899,9 @@ function relGrantLabel(raw) {
     handle: spidT('relations.share_handle'),
     icons: spidT('relations.share_icons'),
     feedback: spidT('relations.share_feedback'),
-    relations: spidT('relations.share_relations')
+    relations: spidT('relations.share_relations'),
+    'data:read': spidT('relations.share_data_read'),
+    'data:write': spidT('relations.share_data_write'),
   }
   var names = types.map(function (t) {
     if (labels[t]) return labels[t]
@@ -3779,32 +3919,125 @@ function relRenderGrants() {
   if (!relGrants) return
   var target = relMembers()
   relGrants.innerHTML = ''
-  if (!target) { relNote(relGrants, spidT('relations.scope_required')); return }
-  var gs = _relGrants.filter(function (g) {
-    return g.consumer_type === target.type && g.consumer_id === target.id
+  if (!target) {
+    relNote(relGrants, spidT('relations.scope_required'))
+    if (relShareEditor) relShareEditor.innerHTML = ''
+    return
+  }
+  var gs = _displayGrantsFor(target)
+  if (!gs.length) {
+    relNote(relGrants, spidT('relations.no_share'))
+  } else {
+    gs.forEach(function (g) {
+      var el = document.createElement('div'); el.className = 'bb-row'
+      var left = document.createElement('div')
+      var n = document.createElement('div'); n.className = 'bb-title'
+      n.textContent = spidT('relations.data_share')
+      var m = document.createElement('div'); m.className = 'bb-note'
+      m.textContent = relGrantLabel(g.types)
+      left.appendChild(n); left.appendChild(m); el.appendChild(left)
+      if (g.pendingSync) {
+        var pending = document.createElement('span'); pending.className = 'bb-note'
+        pending.textContent = spidT('relations.share_pending')
+        el.appendChild(pending)
+      }
+      if (g.revoked_at) {
+        var b = document.createElement('span'); b.className = 'bb-note'
+        b.textContent = spidT('relations.revoked')
+        el.appendChild(b)
+      } else {
+        var btn = document.createElement('button'); btn.type = 'button'
+        btn.className = 'btn btn-ghost'; btn.textContent = spidT('relations.remove')
+        btn.addEventListener('click', function () {
+          relRevoke(g.consumer_type, g.consumer_id)
+        })
+        el.appendChild(btn)
+      }
+      relGrants.appendChild(el)
+    })
+  }
+  relRenderShareEditor(target)
+}
+
+function relRenderShareEditor(target) {
+  if (!relShareEditor) return
+  relShareEditor.innerHTML = ''
+  if (!target || !_unlockedVault) return
+  var C = _relContract()
+  if (!C || !Array.isArray(C.SHARE_TYPES)) return
+
+  var current = []
+  var shown = _displayGrantsFor(target)
+  if (shown.length) {
+    try { current = JSON.parse(shown[0].types || '[]') } catch (e) { current = [] }
+  }
+  if (!Array.isArray(current)) current = []
+
+  var title = document.createElement('div'); title.className = 'bb-title'
+  title.textContent = spidT('relations.share_choose')
+  relShareEditor.appendChild(title)
+
+  var note = document.createElement('p'); note.className = 'bb-note'
+  note.textContent = spidT('relations.share_signed_note')
+  relShareEditor.appendChild(note)
+
+  var boxes = []
+  C.SHARE_TYPES.forEach(function (type) {
+    var label = document.createElement('label')
+    label.style.cssText = 'display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;margin:6px 0;'
+    var input = document.createElement('input')
+    input.type = 'checkbox'
+    input.checked = current.indexOf(type) >= 0
+    input.value = type
+    var span = document.createElement('span')
+    span.textContent = _shareTypeLabel(type)
+    label.appendChild(input)
+    label.appendChild(span)
+    relShareEditor.appendChild(label)
+    boxes.push(input)
   })
-  if (!gs.length) { relNote(relGrants, spidT('relations.no_share')); return }
-  gs.forEach(function (g) {
-    var el = document.createElement('div'); el.className = 'bb-row'
-    var left = document.createElement('div')
-    var n = document.createElement('div'); n.className = 'bb-title'
-    n.textContent = 'Partage de données'
-    var m = document.createElement('div'); m.className = 'bb-note'
-    m.textContent = relGrantLabel(g.types)
-    left.appendChild(n); left.appendChild(m); el.appendChild(left)
-    if (g.revoked_at) {
-      var b = document.createElement('span'); b.className = 'bb-note'; b.textContent = 'révoqué'
-      el.appendChild(b)
-    } else {
-      var btn = document.createElement('button'); btn.type = 'button'
-      btn.className = 'btn btn-ghost'; btn.textContent = 'Retirer'
-      btn.addEventListener('click', function () {
-        relRevoke(g.consumer_type, g.consumer_id)
-      })
-      el.appendChild(btn)
-    }
-    relGrants.appendChild(el)
+
+  var actions = document.createElement('div')
+  actions.className = 'rel-share-actions'
+  var save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'btn btn-ghost'
+  save.textContent = spidT('relations.shares_save')
+  save.addEventListener('click', function () {
+    var selected = boxes.filter(function (b) { return b.checked }).map(function (b) { return b.value })
+    relSaveShares(target, selected)
   })
+  actions.appendChild(save)
+  relShareEditor.appendChild(actions)
+}
+
+function relRenderRequestedEditor() {
+  if (!relRequestedEditor || relRequestedEditor.childElementCount) return
+  var C = _relContract()
+  if (!C || !Array.isArray(C.SHARE_TYPES)) return
+  var note = document.createElement('p'); note.className = 'bb-note'
+  note.textContent = spidT('relations.requested_note')
+  relRequestedEditor.appendChild(note)
+  C.SHARE_TYPES.forEach(function (type) {
+    var label = document.createElement('label')
+    label.style.cssText = 'display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;margin:6px 0;'
+    var input = document.createElement('input')
+    input.type = 'checkbox'
+    input.value = type
+    input.checked = type === 'handle'
+    input.dataset.relRequested = '1'
+    var span = document.createElement('span')
+    span.textContent = _shareTypeLabel(type)
+    label.appendChild(input); label.appendChild(span)
+    relRequestedEditor.appendChild(label)
+  })
+}
+
+function relRequestedTypes() {
+  if (!relRequestedEditor) return []
+  return Array.prototype.slice.call(
+    relRequestedEditor.querySelectorAll('input[data-rel-requested]:checked')
+  ).map(function (i) { return i.value })
 }
 
 function relMembers() {
@@ -4015,9 +4248,11 @@ function relInvite() {
     relSetStatus(window.spidT ? spidT('relations.pending_invite') : 'Invitation en attente d’approbation.')
     return
   }
+  var requested = relRequestedEditor ? relRequestedTypes() : ['handle']
   var payload = {
     id: crypto.randomUUID(), type: 'ReferralCredential', from_did: did,
     to_did: toDid, node_id: target.id, node_name: targetName, scope: target.type,
+    requested: requested,
     from_status_at_time: status, weight: status === 'approved' ? 3 : 1,
     disclosed: {}, note: null, created_at: new Date().toISOString(), expires_at: null,
   }
@@ -4028,7 +4263,7 @@ function relInvite() {
       var descriptor = {
         scope: target, name: targetName,
         anchor: SPID_INVITE_ANCHOR,
-        requested: ['handle'], referral: payload,
+        requested: requested, referral: payload,
       }
       var link = _relInviteLink(descriptor)
       _relShowInvite(link)
@@ -4044,15 +4279,128 @@ function relInvite() {
     .catch(function (e) { relSetStatus('Erreur : ' + (e && e.message ? e.message : e)) })
 }
 
+function _readRelResponse(resp) {
+  return resp.text().then(function (t) {
+    var d = null
+    try { d = JSON.parse(t) } catch (e) { d = null }
+    if (!resp.ok || !d || !d.ok) {
+      throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+    }
+    return d
+  })
+}
+
+function relSaveShares(target, selected) {
+  if (!_unlockedVault) { relSetStatus(spidT('relations.no_passport')); return Promise.resolve(false) }
+  if (!selected.length) return relRevokeShares(target)
+  relSetStatus(spidT('relations.signing'), true)
+  var serverVisible = _scopeInPortalRelations(target)
+  var grant
+  return _signShareGrant(target, selected, null)
+    .then(function (g) {
+      grant = g
+      var entry = Object.assign({}, grant, {
+        saved_at: nowIso(),
+        pendingSync: serverVisible,
+        local: !serverVisible,
+      })
+      _setLocalShareGrant(entry)
+      return _persistLocalShares().then(function () {
+        if (!serverVisible) return { ok: true }
+        return _relSelfCall('share', { scope: target, grant: grant },
+          _msScope(), SPID_SWITCH_HOST).then(_readRelResponse)
+      }).then(function () {
+        entry.pendingSync = false
+        return _persistLocalShares()
+      }).then(function () {
+        relSetStatus(spidT('relations.shares_saved'))
+        return true
+      }).catch(function (e) {
+        relSetStatus(spidT('relations.share_pending') + ' ' + (e.message || ''))
+        return false
+      })
+    })
+    .then(function (ok) { if (ok) relLoad(); return ok })
+    .catch(function (e) { relSetStatus(spidT('relations.error') + (e.message || e)); return false })
+}
+
+function relRevokeShares(target) {
+  if (!_unlockedVault) { relSetStatus(spidT('relations.no_passport')); return Promise.resolve(false) }
+  relSetStatus(spidT('relations.signing'), true)
+  var serverVisible = _scopeInPortalRelations(target)
+  return _signShareRevocation(target)
+    .then(function (revocation) {
+      var prev = _localShareGrant(target)
+      var entry = {
+        type: 'ShareGrant',
+        holder_did: _holderDid(),
+        scope: target,
+        types: prev ? (prev.types || []) : [],
+        issued_at: prev ? prev.issued_at : revocation.issued_at,
+        expires_at: prev ? (prev.expires_at || null) : null,
+        revoked_at: revocation.issued_at,
+        revocation: revocation,
+        saved_at: nowIso(),
+        pendingSync: serverVisible,
+        local: !serverVisible,
+      }
+      _setLocalShareGrant(entry)
+      return _persistLocalShares().then(function () {
+        if (!serverVisible) return { ok: true }
+        return _relSelfCall('revoke', { scope: target, revocation: revocation },
+          _msScope(), SPID_SWITCH_HOST).then(_readRelResponse)
+      }).then(function () {
+        entry.pendingSync = false
+        return _persistLocalShares()
+      }).then(function () {
+        relSetStatus(spidT('relations.share_revoked'))
+        return true
+      }).catch(function (e) {
+        relSetStatus(spidT('relations.share_pending') + ' ' + (e.message || ''))
+        return false
+      })
+    })
+    .then(function (ok) { if (ok) relLoad(); return ok })
+    .catch(function (e) { relSetStatus(spidT('relations.error') + (e.message || e)); return false })
+}
+
 function relRevoke(kind, id) {
   var C = _relContract()
   if (!C) return
   var target
   try { target = C.normalizeScope({ type: kind, id: id }) }
   catch (e) { return }
-  _relSelfCall('revoke', { scope: target }, _msScope(), SPID_SWITCH_HOST)
-    .then(function () { relLoad() })
-    .catch(function () {})
+  relRevokeShares(target)
+}
+
+function _flushPendingPortalShares() {
+  if (!_unlockedVault) return Promise.resolve()
+  var pending = (_unlockedVault.shareGrants || []).filter(function (g) {
+    return g && g.pendingSync && !g.local
+  })
+  if (!pending.length) return Promise.resolve()
+  var changed = false
+  var chain = Promise.resolve()
+  pending.forEach(function (g) {
+    chain = chain.then(function () {
+      var call = null
+      if (g.revocation) {
+        call = _relSelfCall('revoke', { scope: g.scope, revocation: g.revocation },
+          _msScope(), SPID_SWITCH_HOST)
+      } else if (g.signature) {
+        call = _relSelfCall('share', { scope: g.scope, grant: g },
+          _msScope(), SPID_SWITCH_HOST)
+      }
+      if (!call) return
+      return call.then(_readRelResponse).then(function () {
+        g.pendingSync = false
+        changed = true
+      }).catch(function () { /* keep pending */ })
+    })
+  })
+  return chain.then(function () {
+    if (changed) return _persistLocalShares()
+  })
 }
 
 ;(function relWire() {
