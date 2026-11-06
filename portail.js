@@ -335,7 +335,6 @@ var _vaultKey      = null
 // Cluster selectors. It is not written into the vault: the Passport owns the
 // persistent copy; the Portail only presents the current server view.
 var _portalRelations = null
-var _portalGrants    = []
 
 function showMsg(kind, text) {
   msgBox.className = 'msg show ' + kind
@@ -3508,7 +3507,6 @@ var relStatus  = document.getElementById('relStatus')
 var relGrants  = document.getElementById('relGrants')
 var relShareEditor = document.getElementById('relShareEditor')
 var relRequestedEditor = document.getElementById('relRequestedEditor')
-var _relGrants = []
 var relScope   = document.getElementById('relScope')
 var relTo      = document.getElementById('relTo')
 var relInviteBtn = document.getElementById('relInviteBtn')
@@ -3599,8 +3597,8 @@ function _signShareRevocation(scope) {
 }
 
 /**
- * Local signed grants win over the server projection. If the local vault has
- * no choice yet, the server view remains visible as a legacy projection.
+ * Only the holder's signed choice is displayed. The server row is a routing
+ * projection, never a source for the Passport UI.
  */
 function _scopeInPortalRelations(scope) {
   if (!scope || !_portalRelations) return false
@@ -3630,9 +3628,7 @@ function _displayGrantsFor(scope) {
       local: true,
     }]
   }
-  return _relGrants.filter(function (g) {
-    return g.consumer_type === scope.type && g.consumer_id === scope.id
-  })
+  return []
 }
 
 function relSetStatus(text, loading) {
@@ -3704,8 +3700,7 @@ function loadPortalRelations() {
                  error: (d && (d.error || d.message)) || ('HTTP ' + resp.status) }
       }
       _portalRelations = d.relations
-      _portalGrants    = d.grants || []
-      return { ok: true, relations: _portalRelations, grants: _portalGrants }
+      return { ok: true, relations: _portalRelations }
     })})
     .catch(function (e) {
       return { ok: false, error: (e && e.message) ? e.message : String(e) }
@@ -3731,7 +3726,7 @@ function refreshPortalRelations() {
     var C = _relContract()
     if (C && servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
       _relLoaded = true
-      relRender({ relations: r.relations, grants: r.grants }, C)
+      relRender({ relations: r.relations }, C)
     }
     if (servicePanels.messages && !servicePanels.messages.hasAttribute('hidden')) {
       msLoadContacts()
@@ -3785,7 +3780,7 @@ function relLoad() {
       return
     }
     _relLoaded = true
-    relRender({ relations: r.relations, grants: r.grants }, C)
+    relRender({ relations: r.relations }, C)
   })
 }
 
@@ -3886,7 +3881,6 @@ function relRender(d, C) {
     placeholder.selected = true
   }
 
-  _relGrants = d.grants || []
   relRenderGrants()
   relLoadMembers()
 }
@@ -4263,7 +4257,7 @@ function relInvite() {
       var descriptor = {
         scope: target, name: targetName,
         anchor: SPID_INVITE_ANCHOR,
-        requested: requested, referral: payload,
+        referral: payload,
       }
       var link = _relInviteLink(descriptor)
       _relShowInvite(link)
