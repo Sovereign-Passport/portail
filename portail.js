@@ -1725,7 +1725,7 @@ updateBillboardComposer()
 // No secret, DID or authorization is ever accepted from the URL.
 // ═════════════════════════════════════════════════════════════════════════
 
-var SERVICES = ['assist', 'billboard', 'calendar', 'budget', 'messages', 'relations']
+var SERVICES = ['assist', 'billboard', 'calendar', 'budget', 'messages', 'relations', 'files']
 var DEFAULT_SERVICE = 'assist'
 
 var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
@@ -1768,6 +1768,9 @@ function activateService(name) {
   }
   if (target === 'relations') {
     relInit()
+  }
+  if (target === 'files') {
+    filesInit()
   }
 }
 
@@ -3237,6 +3240,320 @@ if (budgetRefreshBtn) budgetRefreshBtn.addEventListener('click', budgetLoadScope
 if (budgetReconcileBtn) budgetReconcileBtn.addEventListener('click', budgetReconcile)
 if (budgetScopeEl) budgetScopeEl.addEventListener('change', budgetLoad)
 if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budgetInit()
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 7b — FILES (generic shared host; GitHub first adapter)
+// The file service is reached through the Switchboard. The owner keeps the
+// reference file in the vault; GitHub only receives published snapshots and
+// pending contributions.
+// ═════════════════════════════════════════════════════════════════════════
+
+var filesStatusEl = document.getElementById('filesStatus')
+var filesScopeEl = document.getElementById('filesScope')
+var filesFileIdEl = document.getElementById('filesFileId')
+var filesVaultFileEl = document.getElementById('filesVaultFile')
+var filesSnapshotEl = document.getElementById('filesSnapshot')
+var filesVersionEl = document.getElementById('filesVersion')
+var filesPendingEl = document.getElementById('filesPending')
+var filesContentEl = document.getElementById('filesContent')
+var filesRefreshBtn = document.getElementById('filesRefreshBtn')
+var filesLoadVaultBtn = document.getElementById('filesLoadVaultBtn')
+var filesContributeBtn = document.getElementById('filesContributeBtn')
+var filesIntegrateBtn = document.getElementById('filesIntegrateBtn')
+var filesPublishBtn = document.getElementById('filesPublishBtn')
+var _filesState = null
+var _filesLoaded = false
+
+function filesT(key, fallback) {
+  return window.spidT ? spidT(key) : fallback
+}
+
+function filesSetStatus(text, loading) {
+  if (!filesStatusEl) return
+  filesStatusEl.textContent = text || ''
+  filesStatusEl.style.display = text ? 'block' : 'none'
+  filesStatusEl.classList.toggle('loading', !!loading)
+}
+
+function filesCurrentScope() {
+  return filesScopeEl && filesScopeEl.value
+    ? { type: 'cluster', id: filesScopeEl.value }
+    : null
+}
+
+function filesNoScope(text) {
+  if (!filesScopeEl) return
+  filesScopeEl.innerHTML = ''
+  var o = document.createElement('option')
+  o.value = ''
+  o.disabled = true
+  o.selected = true
+  o.textContent = text
+  filesScopeEl.appendChild(o)
+  if (filesSnapshotEl) filesSnapshotEl.value = ''
+  if (filesPendingEl) filesPendingEl.innerHTML = ''
+  if (filesContentEl) filesContentEl.value = ''
+  if (filesVersionEl) filesVersionEl.textContent = ''
+  filesSetStatus(text)
+}
+
+function filesRenderVaultFiles() {
+  if (!filesVaultFileEl) return
+  var keep = filesVaultFileEl.value
+  filesVaultFileEl.innerHTML = ''
+  var empty = document.createElement('option')
+  empty.value = ''
+  empty.textContent = '—'
+  filesVaultFileEl.appendChild(empty)
+  var files = (_unlockedVault && _unlockedVault.files) || []
+  files.forEach(function (f) {
+    if (!f || typeof f.content !== 'string') return
+    if (/^data:image\//i.test(f.content)) return
+    var o = document.createElement('option')
+    o.value = f.name || f.path || ''
+    o.textContent = (f.name || f.path || 'file') +
+      (f.file_id ? ' · ' + f.file_id : '')
+    filesVaultFileEl.appendChild(o)
+  })
+  if (keep) filesVaultFileEl.value = keep
+}
+
+function filesLoadScopes(relations) {
+  if (!filesScopeEl) return
+  var keep = filesScopeEl.value
+  var serverIds = {}
+  ;((relations && relations.clusters) || []).forEach(function (c) {
+    if (c && c.id && (c.cluster_status || 'active') === 'active') serverIds[c.id] = true
+  })
+  var clusters = buildClusterOptions(_unlockedVault, relations).filter(function (c) {
+    return !c.local_only && !!serverIds[c.cluster_id]
+  })
+  filesScopeEl.innerHTML = ''
+  if (!clusters.length) {
+    filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.'))
+    return
+  }
+  clusters.forEach(function (c) {
+    var o = document.createElement('option')
+    o.value = c.cluster_id
+    o.textContent = c.label || c.name || c.cluster_id
+    filesScopeEl.appendChild(o)
+  })
+  if (keep) filesScopeEl.value = keep
+  if (!filesScopeEl.value) filesScopeEl.value = clusters[0].cluster_id
+  filesLoad()
+}
+
+function filesInit() {
+  if (!_unlockedVault) {
+    filesNoScope(filesT('files.unlock', 'Ouvrez votre passport.'))
+    filesSetStatus(filesT('files.unlock', 'Ouvrez votre passport.'))
+    return
+  }
+  filesRenderVaultFiles()
+  filesSetStatus(filesT('files.loading', 'Chargement…'), true)
+  loadPortalRelations().then(function (r) {
+    if (!r.ok) {
+      filesNoScope(filesT('files.unavailable', 'Indisponible.'))
+      filesSetStatus(filesT('files.unavailable', 'Indisponible : ') + (r.error || ''))
+      return
+    }
+    _filesLoaded = true
+    filesLoadScopes(r.relations)
+  }).catch(function (e) {
+    filesNoScope(filesT('files.unavailable', 'Indisponible.'))
+    filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e))
+  })
+}
+
+function filesRender(state) {
+  _filesState = state || null
+  if (filesSnapshotEl) {
+    filesSnapshotEl.value = state && state.snapshot ? state.snapshot.content : ''
+  }
+  if (filesContentEl) {
+    filesContentEl.value = state && state.snapshot ? state.snapshot.content : ''
+  }
+  if (filesVersionEl) {
+    if (state && state.manifest && state.manifest.version > 0) {
+      filesVersionEl.textContent = 'v' + state.manifest.version +
+        (state.manifest.head && state.manifest.head.hash ? ' · ' + state.manifest.head.hash : '')
+    } else {
+      filesVersionEl.textContent = filesT('files.no_snapshot', 'Aucun snapshot publié.')
+    }
+  }
+  if (!filesPendingEl) return
+  filesPendingEl.innerHTML = ''
+  var pending = state && state.pending ? state.pending : []
+  if (!pending.length) {
+    var none = document.createElement('p'); none.className = 'bb-empty'
+    none.textContent = filesT('files.no_pending', 'Aucun ajout en attente.')
+    filesPendingEl.appendChild(none)
+    return
+  }
+  pending.forEach(function (p) {
+    var row = document.createElement('div'); row.className = 'bb-row'
+    var left = document.createElement('div')
+    var label = document.createElement('label')
+    label.style.cssText = 'display:flex;align-items:center;gap:8px;'
+    var check = document.createElement('input')
+    check.type = 'checkbox'
+    check.dataset.proposalId = p.proposal_id
+    var title = document.createElement('span'); title.className = 'bb-title'
+    title.textContent = p.created_by_did || p.proposal_id
+    label.appendChild(check); label.appendChild(title)
+    var meta = document.createElement('div'); meta.className = 'bb-note'
+    meta.textContent = 'base v' + p.base_version + ' · ' + (p.created_at || '')
+    var body = document.createElement('pre')
+    body.style.cssText = 'white-space:pre-wrap;font-size:11px;color:var(--ink-dim);max-height:140px;overflow:auto;margin:6px 0 0;'
+    body.textContent = p.content || ''
+    left.appendChild(label); left.appendChild(meta); left.appendChild(body)
+    row.appendChild(left)
+    filesPendingEl.appendChild(row)
+  })
+}
+
+function filesLoad() {
+  var scope = filesCurrentScope()
+  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  if (!_unlockedVault) { filesSetStatus(filesT('files.unlock', 'Ouvrez votre passport.')); return }
+  if (!scope) { filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.')); return }
+  if (!fileId) { filesSetStatus(filesT('files.file_required', 'Identifiant requis.')); return }
+  filesSetStatus(filesT('files.loading', 'Chargement…'), true)
+  _selfSignedBody('files', 'state', { file_id: fileId }, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return d
+    })})
+    .then(function (d) {
+      _filesLoaded = true
+      filesSetStatus('')
+      filesRender(d)
+    })
+    .catch(function (e) {
+      filesSetStatus(filesT('files.unavailable', 'Indisponible : ') + (e && e.message ? e.message : e))
+    })
+}
+
+function filesLoadVaultFile() {
+  if (!filesVaultFileEl) return
+  var name = filesVaultFileEl.value
+  var f = ((_unlockedVault && _unlockedVault.files) || []).find(function (x) {
+    return x && (x.name === name || x.path === name)
+  })
+  if (!f) return
+  if (filesFileIdEl && f.file_id) filesFileIdEl.value = f.file_id
+  if (filesContentEl) filesContentEl.value = f.content || ''
+}
+
+function filesIntegrateChecked() {
+  if (!filesPendingEl || !filesContentEl) return
+  var ids = Array.prototype.slice.call(
+    filesPendingEl.querySelectorAll('input[data-proposal-id]:checked')
+  ).map(function (i) { return i.dataset.proposalId })
+  if (!ids.length) {
+    filesSetStatus(filesT('files.no_pending_selected', 'Aucun ajout coché.'))
+    return
+  }
+  var pending = (_filesState && _filesState.pending) || []
+  var additions = pending.filter(function (p) {
+    return ids.indexOf(p.proposal_id) !== -1
+  }).map(function (p) { return p.content || '' })
+  if (!additions.length) return
+  var current = filesContentEl.value || ''
+  filesContentEl.value = current + (current && !/\n$/.test(current) ? '\n' : '') + additions.join('\n')
+  filesSetStatus(filesT('files.integrated', 'Ajouts intégrés dans le contenu. Vérifie puis publie.'))
+}
+
+function filesSaveVaultReference(name, content, fileId, version, hash, scope) {
+  if (!name || !_unlockedVault) return Promise.resolve()
+  var f = (_unlockedVault.files || []).find(function (x) {
+    return x && (x.name === name || x.path === name)
+  })
+  if (!f) return Promise.resolve()
+  f.content = content
+  f.file_id = fileId
+  f.version = version
+  f.hash = hash
+  f.visibility = 'shared'
+  f.share = { scope: scope, access: ['data:read', 'data:write'] }
+  return _persistLocalShares().catch(function () {})
+}
+
+function filesContribute() {
+  var scope = filesCurrentScope()
+  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  var content = filesContentEl ? filesContentEl.value : ''
+  if (!scope || !fileId) { filesSetStatus(filesT('files.scope_required', 'Choisis un cluster et un identifiant.')); return }
+  if (!content) { filesSetStatus(filesT('files.content_required', 'Contenu requis.')); return }
+  filesSetStatus(filesT('files.signing', 'Signature…'), true)
+  var base = _filesState && _filesState.manifest ? _filesState.manifest.version : 0
+  _selfSignedBody('files', 'contribute', {
+    file_id: fileId, content: content, base_version: base,
+  }, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return d
+    })})
+    .then(function () {
+      filesSetStatus(filesT('files.contributed', 'Ajout enregistré en attente.'))
+      filesLoad()
+    })
+    .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
+}
+
+function filesPublish() {
+  var scope = filesCurrentScope()
+  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  var content = filesContentEl ? filesContentEl.value : ''
+  var checked = filesPendingEl
+    ? Array.prototype.slice.call(filesPendingEl.querySelectorAll('input[data-proposal-id]:checked'))
+    : []
+  if (!scope || !fileId) { filesSetStatus(filesT('files.scope_required', 'Choisis un cluster et un identifiant.')); return }
+  if (!content) { filesSetStatus(filesT('files.content_required', 'Contenu requis.')); return }
+  var expected = _filesState && _filesState.manifest ? _filesState.manifest.version : 0
+  var confirmIds = checked.map(function (i) { return i.dataset.proposalId })
+  var name = _filesState && _filesState.manifest ? _filesState.manifest.name : fileId
+  filesSetStatus(filesT('files.signing', 'Signature…'), true)
+  _selfSignedBody('files', 'publish', {
+    file_id: fileId,
+    content: content,
+    expected_version: expected,
+    confirm_ids: confirmIds,
+    name: name,
+    mime: 'text/plain',
+  }, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return d
+    })})
+    .then(function (d) {
+      filesSetStatus(filesT('files.published', 'Snapshot publié ✓'))
+      return filesSaveVaultReference(filesVaultFileEl && filesVaultFileEl.value,
+        content, fileId, d.version, d.hash, scope).then(function () {
+        return filesLoad()
+      })
+    })
+    .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
+}
+
+if (filesRefreshBtn) filesRefreshBtn.addEventListener('click', filesInit)
+if (filesLoadVaultBtn) filesLoadVaultBtn.addEventListener('click', filesLoadVaultFile)
+if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContribute)
+if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
+if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
+if (filesScopeEl) filesScopeEl.addEventListener('change', filesLoad)
+if (filesFileIdEl) filesFileIdEl.addEventListener('change', filesLoad)
+if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
 
 // ═════════════════════════════════════════════════════════════════════════
 // SECTION 8 — MESSAGES (DID-centric)
