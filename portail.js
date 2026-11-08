@@ -3400,7 +3400,7 @@ function filesRender(state) {
     check.type = 'checkbox'
     check.dataset.proposalId = p.proposal_id
     var title = document.createElement('span'); title.className = 'bb-title'
-    title.textContent = p.created_by_did || p.proposal_id
+    title.textContent = p.created_by_handle || p.created_by_did || p.proposal_id
     label.appendChild(check); label.appendChild(title)
     var meta = document.createElement('div'); meta.className = 'bb-note'
     meta.textContent = 'base v' + p.base_version + ' · ' + (p.created_at || '')
@@ -3458,14 +3458,18 @@ function filesIntegrateChecked() {
     filesSetStatus(filesT('files.no_pending_selected', 'Aucun ajout coché.'))
     return
   }
+  if (ids.length !== 1) {
+    filesSetStatus(filesT('files.select_one', 'Sélectionne un seul ajout à intégrer.'))
+    return
+  }
   var pending = (_filesState && _filesState.pending) || []
-  var additions = pending.filter(function (p) {
-    return ids.indexOf(p.proposal_id) !== -1
-  }).map(function (p) { return p.content || '' })
-  if (!additions.length) return
-  var current = filesContentEl.value || ''
-  filesContentEl.value = current + (current && !/\n$/.test(current) ? '\n' : '') + additions.join('\n')
-  filesSetStatus(filesT('files.integrated', 'Ajouts intégrés dans le contenu. Vérifie puis publie.'))
+  var chosen = pending.find(function (p) { return p.proposal_id === ids[0] })
+  if (!chosen) return
+  // Contributions are full revisions, not append-only patches. Replace the
+  // editor with the chosen revision so inline edits are preserved exactly and
+  // no snapshot is duplicated at the bottom.
+  filesContentEl.value = chosen.content || ''
+  filesSetStatus(filesT('files.integrated', 'Ajout intégré dans le contenu. Vérifie puis publie.'))
 }
 
 function filesSaveVaultReference(name, content, fileId, version, hash, scope) {
