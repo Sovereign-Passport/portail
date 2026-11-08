@@ -3250,6 +3250,7 @@ if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budget
 
 var filesStatusEl = document.getElementById('filesStatus')
 var filesScopeEl = document.getElementById('filesScope')
+var filesScopeLabel = document.getElementById('filesScopeLabel')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
 var filesVersionEl = document.getElementById('filesVersion')
@@ -3328,6 +3329,13 @@ function filesRenderVaultFiles() {
   if (!filesVaultFileEl) return
   var keep = filesVaultFileEl.value
   var scope = filesCurrentScope()
+  if (filesScopeLabel) {
+    var selected = filesScopeEl && filesScopeEl.options[filesScopeEl.selectedIndex]
+    var scopeName = selected ? selected.textContent : ''
+    filesScopeLabel.textContent = scopeName
+      ? filesT('files.scope_files', 'Fichiers disponibles pour') + ' ' + scopeName
+      : ''
+  }
   filesVaultFileEl.innerHTML = ''
   var empty = document.createElement('option')
   empty.value = ''
@@ -3592,11 +3600,16 @@ function filesPublish() {
 if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContribute)
 if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
 if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
-if (filesVaultFileEl) filesVaultFileEl.addEventListener('change', filesLoadVaultFile)
-if (filesScopeEl) filesScopeEl.addEventListener('change', function () {
+function filesOnScopeChange() {
+  // A scope change invalidates the previous reference file selection.
+  if (filesVaultFileEl) filesVaultFileEl.value = ''
+  if (filesContentEl) filesContentEl.value = ''
   filesRenderVaultFiles()
   filesLoad()
-})
+}
+
+if (filesVaultFileEl) filesVaultFileEl.addEventListener('change', filesLoadVaultFile)
+if (filesScopeEl) filesScopeEl.addEventListener('change', filesOnScopeChange)
 if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
 
 // ═════════════════════════════════════════════════════════════════════════
