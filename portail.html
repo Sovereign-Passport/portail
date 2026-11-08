@@ -282,10 +282,6 @@
       </section>
 
       <section class="tab-panel" id="panel-files" role="tabpanel" aria-labelledby="tab-files" tabindex="0" hidden>
-        <div class="ms-bar">
-          <button class="btn btn-ghost" id="filesRefreshBtn" type="button" data-i18n="files.refresh">↻ Rafraîchir</button>
-        </div>
-
         <div class="field">
           <label data-i18n="files.scope">Cluster</label>
           <select id="filesScope" class="bb-select"></select>
@@ -300,6 +296,9 @@
           <div style="display:flex;gap:6px;">
             <select id="filesVaultFile" class="bb-select" style="flex:1;"></select>
             <button class="btn btn-ghost" id="filesLoadVaultBtn" type="button" data-i18n="files.load_vault">Charger</button>
+          </div>
+          <div class="bb-actions" style="margin-top:8px;">
+            <button class="btn btn-ghost" id="filesRefreshBtn" type="button" data-i18n="files.refresh_vault">↻ Rafraîchir les fichiers</button>
           </div>
         </div>
 
@@ -339,9 +338,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=12"></script>
+<script src="i18n/catalogs.js?v=13"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=69"></script>
+<script src="portail.js?v=70"></script>
 </body>
 </html>

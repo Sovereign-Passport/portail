@@ -3298,25 +3298,49 @@ function filesNoScope(text) {
   filesSetStatus(text)
 }
 
+function _fileMatchesScope(f, scope) {
+  if (!scope) return true
+  var share = f && f.share
+  if (share && share.scope) {
+    return share.scope.type === scope.type && share.scope.id === scope.id
+  }
+  // Files created before the sharing metadata, or snapshots carried by a
+  // Cluster, stay selectable only for their declared Cluster.
+  if (f && f.cluster_id) return f.cluster_id === scope.id
+  // An unassigned reference file may be published to the selected scope.
+  return true
+}
+
 function filesRenderVaultFiles() {
   if (!filesVaultFileEl) return
   var keep = filesVaultFileEl.value
+  var scope = filesCurrentScope()
   filesVaultFileEl.innerHTML = ''
   var empty = document.createElement('option')
   empty.value = ''
   empty.textContent = '—'
   filesVaultFileEl.appendChild(empty)
-  var files = (_unlockedVault && _unlockedVault.files) || []
+  var files = ((_unlockedVault && _unlockedVault.files) || []).filter(function (f) {
+    if (!f || typeof f.content !== 'string') return false
+    if (/^data:image\//i.test(f.content)) return false
+    return _fileMatchesScope(f, scope)
+  })
+  if (!files.length) {
+    empty.textContent = filesT('files.no_file', 'Aucun fichier de référence pour ce scope.')
+    if (keep) filesVaultFileEl.value = ''
+    return
+  }
   files.forEach(function (f) {
-    if (!f || typeof f.content !== 'string') return
-    if (/^data:image\//i.test(f.content)) return
     var o = document.createElement('option')
     o.value = f.name || f.path || ''
+    var assigned = f.share && f.share.scope
     o.textContent = (f.name || f.path || 'file') +
-      (f.file_id ? ' · ' + f.file_id : '')
+      (f.file_id ? ' · ' + f.file_id : '') +
+      (assigned ? '' : ' · ' + filesT('files.unassigned', 'non assigné'))
     filesVaultFileEl.appendChild(o)
   })
   if (keep) filesVaultFileEl.value = keep
+  if (!filesVaultFileEl.value) filesVaultFileEl.value = ''
 }
 
 function filesLoadScopes(relations) {
@@ -3342,6 +3366,7 @@ function filesLoadScopes(relations) {
   })
   if (keep) filesScopeEl.value = keep
   if (!filesScopeEl.value) filesScopeEl.value = clusters[0].cluster_id
+  filesRenderVaultFiles()
   filesLoad()
 }
 
@@ -3552,12 +3577,20 @@ function filesPublish() {
     .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
 }
 
-if (filesRefreshBtn) filesRefreshBtn.addEventListener('click', filesInit)
+function filesRefresh() {
+  filesRenderVaultFiles()
+  filesLoad()
+}
+
+if (filesRefreshBtn) filesRefreshBtn.addEventListener('click', filesRefresh)
 if (filesLoadVaultBtn) filesLoadVaultBtn.addEventListener('click', filesLoadVaultFile)
 if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContribute)
 if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
 if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
-if (filesScopeEl) filesScopeEl.addEventListener('change', filesLoad)
+if (filesScopeEl) filesScopeEl.addEventListener('change', function () {
+  filesRenderVaultFiles()
+  filesLoad()
+})
 if (filesFileIdEl) filesFileIdEl.addEventListener('change', filesLoad)
 if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
 
