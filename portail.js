@@ -3262,6 +3262,7 @@ var filesContributeBtn = document.getElementById('filesContributeBtn')
 var filesIntegrateBtn = document.getElementById('filesIntegrateBtn')
 var filesPublishBtn = document.getElementById('filesPublishBtn')
 var _filesState = null
+var _filesIntegrated = []
 var _filesLoaded = false
 
 function filesT(key, fallback) {
@@ -3368,6 +3369,7 @@ function filesInit() {
 
 function filesRender(state) {
   _filesState = state || null
+  _filesIntegrated = []
   if (filesSnapshotEl) {
     filesSnapshotEl.value = state && state.snapshot ? state.snapshot.content : ''
   }
@@ -3468,6 +3470,7 @@ function filesIntegrateChecked() {
   // Contributions are full revisions, not append-only patches. Replace the
   // editor with the chosen revision so inline edits are preserved exactly and
   // no snapshot is duplicated at the bottom.
+  _filesIntegrated = [chosen.proposal_id]
   filesContentEl.value = chosen.content || ''
   filesSetStatus(filesT('files.integrated', 'Ajout intégré dans le contenu. Vérifie puis publie.'))
 }
@@ -3516,13 +3519,12 @@ function filesPublish() {
   var scope = filesCurrentScope()
   var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
   var content = filesContentEl ? filesContentEl.value : ''
-  var checked = filesPendingEl
-    ? Array.prototype.slice.call(filesPendingEl.querySelectorAll('input[data-proposal-id]:checked'))
-    : []
   if (!scope || !fileId) { filesSetStatus(filesT('files.scope_required', 'Choisis un cluster et un identifiant.')); return }
   if (!content) { filesSetStatus(filesT('files.content_required', 'Contenu requis.')); return }
   var expected = _filesState && _filesState.manifest ? _filesState.manifest.version : 0
-  var confirmIds = checked.map(function (i) { return i.dataset.proposalId })
+  // Only the revision explicitly integrated above is confirmed/removed. A
+  // checkbox alone must never delete an unintegrated contribution.
+  var confirmIds = (_filesIntegrated || []).slice()
   var name = _filesState && _filesState.manifest ? _filesState.manifest.name : fileId
   filesSetStatus(filesT('files.signing', 'Signature…'), true)
   _selfSignedBody('files', 'publish', {
