@@ -3252,8 +3252,9 @@ var filesStatusEl = document.getElementById('filesStatus')
 var filesScopeEl = document.getElementById('filesScope')
 var filesScopeLabel = document.getElementById('filesScopeLabel')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
+var filesSnapshotField = document.getElementById('filesSnapshotField')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
-var filesVersionEl = document.getElementById('filesVersion')
+var filesVersionTagEl = document.getElementById('filesVersionTag')
 var filesPendingEl = document.getElementById('filesPending')
 var filesContentEl = document.getElementById('filesContent')
 var filesContributeBtn = document.getElementById('filesContributeBtn')
@@ -3296,6 +3297,15 @@ function filesCurrentFileId() {
   return String(name).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 100)
 }
 
+function filesClearState() {
+  _filesState = null
+  _filesIntegrated = []
+  if (filesSnapshotField) filesSnapshotField.style.display = 'none'
+  if (filesSnapshotEl) filesSnapshotEl.value = ''
+  if (filesPendingEl) filesPendingEl.innerHTML = ''
+  if (filesVersionTagEl) filesVersionTagEl.textContent = ''
+}
+
 function filesNoScope(text) {
   if (!filesScopeEl) return
   filesScopeEl.innerHTML = ''
@@ -3305,35 +3315,35 @@ function filesNoScope(text) {
   o.selected = true
   o.textContent = text
   filesScopeEl.appendChild(o)
-  if (filesSnapshotEl) filesSnapshotEl.value = ''
-  if (filesPendingEl) filesPendingEl.innerHTML = ''
+  filesClearState()
   if (filesContentEl) filesContentEl.value = ''
-  if (filesVersionEl) filesVersionEl.textContent = ''
   filesSetStatus(text)
 }
 
-function _fileMatchesScope(f, scope) {
-  if (!scope) return true
-  var share = f && f.share
-  if (share && share.scope) {
-    return share.scope.type === scope.type && share.scope.id === scope.id
+function _fileScopeLabel(f) {
+  var scope = f && f.share && f.share.scope
+  if (!scope) return filesT('files.unassigned', 'non assigné')
+  if (scope.type === 'cluster') {
+    var c = ((_portalRelations && _portalRelations.clusters) || []).find(function (x) {
+      return x && x.id === scope.id
+    })
+    if (c && c.name) return c.name
+    var own = ((_unlockedVault && _unlockedVault.ownClusters) || []).find(function (x) {
+      return x && x.id === scope.id
+    })
+    if (own && own.name) return own.name
   }
-  // Files created before the sharing metadata, or snapshots carried by a
-  // Cluster, stay selectable only for their declared Cluster.
-  if (f && f.cluster_id) return f.cluster_id === scope.id
-  // An unassigned reference file may be published to the selected scope.
-  return true
+  return scope.type + ':' + scope.id
 }
 
 function filesRenderVaultFiles() {
   if (!filesVaultFileEl) return
   var keep = filesVaultFileEl.value
-  var scope = filesCurrentScope()
   if (filesScopeLabel) {
     var selected = filesScopeEl && filesScopeEl.options[filesScopeEl.selectedIndex]
     var scopeName = selected ? selected.textContent : ''
     filesScopeLabel.textContent = scopeName
-      ? filesT('files.scope_files', 'Fichiers disponibles pour') + ' ' + scopeName
+      ? filesT('files.scope_files', 'Fichiers du Passport — cible :') + ' ' + scopeName
       : ''
   }
   filesVaultFileEl.innerHTML = ''
@@ -3344,10 +3354,10 @@ function filesRenderVaultFiles() {
   var files = ((_unlockedVault && _unlockedVault.files) || []).filter(function (f) {
     if (!f || typeof f.content !== 'string') return false
     if (/^data:image\//i.test(f.content)) return false
-    return _fileMatchesScope(f, scope)
+    return true
   })
   if (!files.length) {
-    empty.textContent = filesT('files.no_file', 'Aucun fichier de référence pour ce scope.')
+    empty.textContent = filesT('files.no_file', 'Aucun fichier de référence dans le Passport.')
     filesVaultFileEl.value = ''
     if (filesContentEl) filesContentEl.value = ''
     return
@@ -3355,10 +3365,8 @@ function filesRenderVaultFiles() {
   files.forEach(function (f) {
     var o = document.createElement('option')
     o.value = f.name || f.path || ''
-    var assigned = f.share && f.share.scope
     o.textContent = (f.name || f.path || 'file') +
-      (f.file_id ? ' · ' + f.file_id : '') +
-      (assigned ? '' : ' · ' + filesT('files.unassigned', 'non assigné'))
+      ' · ' + _fileScopeLabel(f)
     filesVaultFileEl.appendChild(o)
   })
   if (keep) filesVaultFileEl.value = keep
@@ -3420,15 +3428,15 @@ function filesInit() {
 function filesRender(state) {
   _filesState = state || null
   _filesIntegrated = []
+  if (filesSnapshotField) filesSnapshotField.style.display = 'block'
   if (filesSnapshotEl) {
     filesSnapshotEl.value = state && state.snapshot ? state.snapshot.content : ''
   }
-  if (filesVersionEl) {
-    if (state && state.manifest && state.manifest.version > 0) {
-      filesVersionEl.textContent = 'v' + state.manifest.version
-    } else {
-      filesVersionEl.textContent = filesT('files.no_snapshot', 'Aucun snapshot publié.')
-    }
+  if (filesVersionTagEl) {
+    filesVersionTagEl.textContent =
+      state && state.manifest && state.manifest.version > 0
+        ? '[' + 'v' + state.manifest.version + ']'
+        : ''
   }
   if (!filesPendingEl) return
   filesPendingEl.innerHTML = ''
@@ -3466,7 +3474,12 @@ function filesLoad() {
   var fileId = filesCurrentFileId()
   if (!_unlockedVault) { filesSetStatus(filesT('files.unlock', 'Ouvrez votre passport.')); return }
   if (!scope) { filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.')); return }
-  if (!fileId) { filesSetStatus(filesT('files.select_file', 'Sélectionne un fichier de référence.')); return }
+  if (!fileId) {
+    filesClearState()
+    filesSetStatus(filesT('files.select_file', 'Sélectionne un fichier de référence.'))
+    return
+  }
+  filesClearState()
   filesSetStatus(filesT('files.loading', 'Chargement…'), true)
   _selfSignedBody('files', 'state', { file_id: fileId }, scope, SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
@@ -3601,7 +3614,9 @@ if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContri
 if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
 if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
 function filesOnScopeChange() {
-  // A scope change invalidates the previous reference file selection.
+  // A scope change invalidates the previous reference file selection and the
+  // previous snapshot/pending display.
+  filesClearState()
   if (filesVaultFileEl) filesVaultFileEl.value = ''
   if (filesContentEl) filesContentEl.value = ''
   filesRenderVaultFiles()

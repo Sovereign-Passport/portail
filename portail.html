@@ -292,10 +292,10 @@
           <select id="filesVaultFile" class="bb-select"></select>
         </div>
 
-        <div class="field">
-          <label data-i18n="files.snapshot">Dernier snapshot publié</label>
+        <div class="field" id="filesSnapshotField" style="display:none;">
+          <label><span data-i18n="files.snapshot">Dernier snapshot publié</span>
+            <span id="filesVersionTag" class="bb-note" style="margin-left:6px;"></span></label>
           <textarea id="filesSnapshot" class="bb-textarea" rows="8" readonly></textarea>
-          <p id="filesVersion" class="bb-note"></p>
         </div>
 
         <div class="field">
@@ -328,9 +328,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=15"></script>
+<script src="i18n/catalogs.js?v=16"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=72"></script>
+<script src="portail.js?v=73"></script>
 </body>
 </html>
