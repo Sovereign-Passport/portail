@@ -3252,6 +3252,7 @@ var filesStatusEl = document.getElementById('filesStatus')
 var filesScopeEl = document.getElementById('filesScope')
 var filesScopeLabel = document.getElementById('filesScopeLabel')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
+var filesPublishedNote = document.getElementById('filesPublishedNote')
 var filesSnapshotField = document.getElementById('filesSnapshotField')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
 var filesVersionTagEl = document.getElementById('filesVersionTag')
@@ -3263,6 +3264,9 @@ var filesPublishBtn = document.getElementById('filesPublishBtn')
 var _filesState = null
 var _filesIntegrated = []
 var _filesLoaded = false
+var _filesPublished = []
+var _filesPublishedScope = ''
+var _filesLoadContentFromSnapshot = false
 
 function filesT(key, fallback) {
   return window.spidT ? spidT(key) : fallback
@@ -3281,20 +3285,33 @@ function filesCurrentScope() {
     : null
 }
 
+function filesSelectedOption() {
+  if (!filesVaultFileEl || filesVaultFileEl.selectedIndex < 0) return null
+  return filesVaultFileEl.options[filesVaultFileEl.selectedIndex] || null
+}
+
+function _fileIdFor(f) {
+  if (f && f.file_id) return f.file_id
+  var name = (f && (f.name || f.path)) || ''
+  return String(name).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 100)
+}
+
 function filesCurrentFile() {
+  var opt = filesSelectedOption()
+  if (opt && opt.dataset && opt.dataset.kind === 'published') return null
   if (!filesVaultFileEl || !filesVaultFileEl.value) return null
-  var name = filesVaultFileEl.value
+  var name = (opt && opt.dataset && opt.dataset.name) || filesVaultFileEl.value
   return ((_unlockedVault && _unlockedVault.files) || []).find(function (f) {
     return f && (f.name === name || f.path === name)
   }) || null
 }
 
 function filesCurrentFileId() {
+  var opt = filesSelectedOption()
+  if (opt && opt.dataset && opt.dataset.fileId) return opt.dataset.fileId
   var f = filesCurrentFile()
   if (!f) return ''
-  if (f.file_id) return f.file_id
-  var name = f.name || f.path || ''
-  return String(name).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 100)
+  return _fileIdFor(f)
 }
 
 function filesClearState() {
@@ -3315,6 +3332,10 @@ function filesNoScope(text) {
   o.selected = true
   o.textContent = text
   filesScopeEl.appendChild(o)
+  _filesPublished = []
+  _filesPublishedScope = ''
+  _filesLoadContentFromSnapshot = false
+  if (filesPublishedNote) filesPublishedNote.textContent = ''
   filesClearState()
   if (filesContentEl) filesContentEl.value = ''
   filesSetStatus(text)
@@ -3343,7 +3364,7 @@ function filesRenderVaultFiles() {
     var selected = filesScopeEl && filesScopeEl.options[filesScopeEl.selectedIndex]
     var scopeName = selected ? selected.textContent : ''
     filesScopeLabel.textContent = scopeName
-      ? filesT('files.scope_files', 'Fichiers du Passport — cible :') + ' ' + scopeName
+      ? filesT('files.scope_files', 'Fichiers disponibles — cible :') + ' ' + scopeName
       : ''
   }
   filesVaultFileEl.innerHTML = ''
@@ -3356,19 +3377,48 @@ function filesRenderVaultFiles() {
     if (/^data:image\//i.test(f.content)) return false
     return true
   })
-  if (!files.length) {
+  var localIds = {}
+  files.forEach(function (f) { localIds[_fileIdFor(f)] = true })
+  var published = (_filesPublishedScope && filesScopeEl &&
+    filesScopeEl.value === _filesPublishedScope ? _filesPublished : [])
+    .filter(function (p) { return p && p.file_id && !localIds[p.file_id] })
+
+  if (!files.length && !published.length) {
     empty.textContent = filesT('files.no_file', 'Aucun fichier de référence dans le Passport.')
     filesVaultFileEl.value = ''
     if (filesContentEl) filesContentEl.value = ''
     return
   }
-  files.forEach(function (f) {
-    var o = document.createElement('option')
-    o.value = f.name || f.path || ''
-    o.textContent = (f.name || f.path || 'file') +
-      ' · ' + _fileScopeLabel(f)
-    filesVaultFileEl.appendChild(o)
-  })
+  if (files.length) {
+    var localGroup = document.createElement('optgroup')
+    localGroup.label = filesT('files.passport_group', 'Fichiers du Passport')
+    files.forEach(function (f) {
+      var name = f.name || f.path || 'file'
+      var o = document.createElement('option')
+      o.value = name
+      o.dataset.kind = 'local'
+      o.dataset.fileId = _fileIdFor(f)
+      o.dataset.name = name
+      o.textContent = name + ' · ' + _fileScopeLabel(f)
+      localGroup.appendChild(o)
+    })
+    filesVaultFileEl.appendChild(localGroup)
+  }
+  if (published.length) {
+    var publishedGroup = document.createElement('optgroup')
+    publishedGroup.label = filesT('files.published_group', 'Fichiers publiés dans ce Cluster')
+    published.forEach(function (p) {
+      var o = document.createElement('option')
+      o.value = 'published:' + p.file_id
+      o.dataset.kind = 'published'
+      o.dataset.fileId = p.file_id
+      o.dataset.name = p.name || p.file_id
+      o.textContent = (p.name || p.file_id) + ' · ' +
+        filesT('files.published_version', 'publié v') + (p.version || 0)
+      publishedGroup.appendChild(o)
+    })
+    filesVaultFileEl.appendChild(publishedGroup)
+  }
   if (keep) filesVaultFileEl.value = keep
   if (!filesVaultFileEl.value) {
     filesVaultFileEl.value = ''
@@ -3378,6 +3428,9 @@ function filesRenderVaultFiles() {
 
 function filesLoadScopes(relations) {
   if (!filesScopeEl) return
+  _filesPublished = []
+  _filesPublishedScope = ''
+  if (filesPublishedNote) filesPublishedNote.textContent = ''
   var keep = filesScopeEl.value
   var serverIds = {}
   ;((relations && relations.clusters) || []).forEach(function (c) {
@@ -3401,6 +3454,52 @@ function filesLoadScopes(relations) {
   if (!filesScopeEl.value) filesScopeEl.value = clusters[0].cluster_id
   filesRenderVaultFiles()
   filesLoad()
+  filesListPublished(filesCurrentScope())
+}
+
+function filesListPublished(scope) {
+  var current = scope || filesCurrentScope()
+  if (!current || !_unlockedVault) {
+    _filesPublished = []
+    _filesPublishedScope = ''
+    if (filesPublishedNote) filesPublishedNote.textContent = ''
+    filesRenderVaultFiles()
+    return Promise.resolve()
+  }
+  _filesPublished = []
+  _filesPublishedScope = current.id
+  if (filesPublishedNote) {
+    filesPublishedNote.textContent = filesT('files.loading', 'Chargement…')
+  }
+  return _selfSignedBody('files', 'list', {}, current, SPID_SWITCH_HOST)
+    .then(function (resp) {
+      return resp.text().then(function (t) {
+        var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+        if (!resp.ok || !d || !d.ok) {
+          throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+        }
+        return d
+      })
+    })
+    .then(function (d) {
+      if (_filesPublishedScope !== current.id) return
+      _filesPublished = Array.isArray(d.files) ? d.files : []
+      filesRenderVaultFiles()
+      if (filesPublishedNote) {
+        filesPublishedNote.textContent = _filesPublished.length
+          ? filesT('files.published_count', 'Publiés dans ce Cluster :') + ' ' + _filesPublished.length
+          : filesT('files.published_none', 'Aucun fichier publié dans ce Cluster.')
+      }
+    })
+    .catch(function (e) {
+      if (_filesPublishedScope !== current.id) return
+      _filesPublished = []
+      filesRenderVaultFiles()
+      if (filesPublishedNote) {
+        filesPublishedNote.textContent = filesT('files.published_unavailable', 'Fichiers publiés indisponibles : ') +
+          (e && e.message ? e.message : e)
+      }
+    })
 }
 
 function filesInit() {
@@ -3475,6 +3574,7 @@ function filesLoad() {
   if (!_unlockedVault) { filesSetStatus(filesT('files.unlock', 'Ouvrez votre passport.')); return }
   if (!scope) { filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.')); return }
   if (!fileId) {
+    _filesLoadContentFromSnapshot = false
     filesClearState()
     filesSetStatus(filesT('files.select_file', 'Sélectionne un fichier de référence.'))
     return
@@ -3493,13 +3593,33 @@ function filesLoad() {
       _filesLoaded = true
       filesSetStatus('')
       filesRender(d)
+      if (_filesLoadContentFromSnapshot) {
+        var selected = filesSelectedOption()
+        if (selected && selected.dataset && selected.dataset.kind === 'published') {
+          if (filesContentEl) {
+            filesContentEl.value = d && d.snapshot && typeof d.snapshot.content === 'string'
+              ? d.snapshot.content
+              : ''
+          }
+        }
+        _filesLoadContentFromSnapshot = false
+      }
     })
     .catch(function (e) {
+      _filesLoadContentFromSnapshot = false
       filesSetStatus(filesT('files.unavailable', 'Indisponible : ') + (e && e.message ? e.message : e))
     })
 }
 
 function filesLoadVaultFile() {
+  var opt = filesSelectedOption()
+  if (opt && opt.dataset && opt.dataset.kind === 'published') {
+    _filesLoadContentFromSnapshot = true
+    if (filesContentEl) filesContentEl.value = ''
+    filesLoad()
+    return
+  }
+  _filesLoadContentFromSnapshot = false
   var f = filesCurrentFile()
   if (!f) {
     if (filesContentEl) filesContentEl.value = ''
@@ -3568,7 +3688,7 @@ function filesContribute() {
     })})
     .then(function () {
       filesSetStatus(filesT('files.contributed', 'Ajout enregistré en attente.'))
-      filesLoad()
+      return filesLoad().then(function () { return filesListPublished(scope) })
     })
     .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
 }
@@ -3605,6 +3725,8 @@ function filesPublish() {
       return filesSaveVaultReference(filesVaultFileEl && filesVaultFileEl.value,
         content, fileId, d.version, d.hash, scope).then(function () {
         return filesLoad()
+      }).then(function () {
+        return filesListPublished(scope)
       })
     })
     .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
@@ -3616,11 +3738,16 @@ if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
 function filesOnScopeChange() {
   // A scope change invalidates the previous reference file selection and the
   // previous snapshot/pending display.
+  _filesPublished = []
+  _filesPublishedScope = ''
+  _filesLoadContentFromSnapshot = false
+  if (filesPublishedNote) filesPublishedNote.textContent = ''
   filesClearState()
   if (filesVaultFileEl) filesVaultFileEl.value = ''
   if (filesContentEl) filesContentEl.value = ''
   filesRenderVaultFiles()
   filesLoad()
+  filesListPublished(filesCurrentScope())
 }
 
 if (filesVaultFileEl) filesVaultFileEl.addEventListener('change', filesLoadVaultFile)

@@ -287,9 +287,10 @@
           <select id="filesScope" class="bb-select"></select>
         </div>
         <div class="field">
-          <label data-i18n="files.from_passport">Fichier de référence dans le Passport</label>
+          <label data-i18n="files.from_passport">Fichier de référence (Passport ou fichier publié du Cluster)</label>
           <p id="filesScopeLabel" class="bb-note"></p>
           <select id="filesVaultFile" class="bb-select"></select>
+          <p id="filesPublishedNote" class="bb-note"></p>
         </div>
 
         <div class="field" id="filesSnapshotField" style="display:none;">
@@ -316,7 +317,7 @@
           <button class="btn btn-ghost" id="filesContributeBtn" type="button" data-i18n="files.contribute">Ajouter un ajout</button>
           <button class="btn btn-gold" id="filesPublishBtn" type="button" data-i18n="files.publish">Publier le snapshot</button>
         </div>
-        <p class="bb-note" data-i18n="files.publish_note">La publication retire seulement l’ajout intégré. Les autres restent en attente.</p>
+        <p class="bb-note" data-i18n="files.publish_note">Seul le propriétaire publie. La publication retire seulement l’ajout intégré ; les autres restent en attente.</p>
       </section>
 
       <div class="footer-note">
@@ -328,9 +329,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=16"></script>
+<script src="i18n/catalogs.js?v=17"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=73"></script>
+<script src="portail.js?v=74"></script>
 </body>
 </html>
