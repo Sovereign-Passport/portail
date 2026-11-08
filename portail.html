@@ -287,19 +287,8 @@
           <select id="filesScope" class="bb-select"></select>
         </div>
         <div class="field">
-          <label data-i18n="files.file_id">Identifiant du fichier</label>
-          <input id="filesFileId" class="did-input" type="text" value="mandalin-note.txt"
-                 placeholder="mandalin-note.txt" autocomplete="off">
-        </div>
-        <div class="field">
           <label data-i18n="files.from_passport">Fichier de référence dans le Passport</label>
-          <div style="display:flex;gap:6px;">
-            <select id="filesVaultFile" class="bb-select" style="flex:1;"></select>
-            <button class="btn btn-ghost" id="filesLoadVaultBtn" type="button" data-i18n="files.load_vault">Charger</button>
-          </div>
-          <div class="bb-actions" style="margin-top:8px;">
-            <button class="btn btn-ghost" id="filesRefreshBtn" type="button" data-i18n="files.refresh_vault">↻ Rafraîchir les fichiers</button>
-          </div>
+          <select id="filesVaultFile" class="bb-select"></select>
         </div>
 
         <div class="field">
@@ -326,7 +315,7 @@
           <button class="btn btn-ghost" id="filesContributeBtn" type="button" data-i18n="files.contribute">Ajouter un ajout</button>
           <button class="btn btn-gold" id="filesPublishBtn" type="button" data-i18n="files.publish">Publier le snapshot</button>
         </div>
-        <p class="bb-note" data-i18n="files.publish_note">La publication retire seulement les ajouts cochés. Les autres restent en attente.</p>
+        <p class="bb-note" data-i18n="files.publish_note">La publication retire seulement l’ajout intégré. Les autres restent en attente.</p>
       </section>
 
       <div class="footer-note">
@@ -338,9 +327,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=13"></script>
+<script src="i18n/catalogs.js?v=14"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=70"></script>
+<script src="portail.js?v=71"></script>
 </body>
 </html>

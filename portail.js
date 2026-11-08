@@ -3250,14 +3250,11 @@ if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budget
 
 var filesStatusEl = document.getElementById('filesStatus')
 var filesScopeEl = document.getElementById('filesScope')
-var filesFileIdEl = document.getElementById('filesFileId')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
 var filesVersionEl = document.getElementById('filesVersion')
 var filesPendingEl = document.getElementById('filesPending')
 var filesContentEl = document.getElementById('filesContent')
-var filesRefreshBtn = document.getElementById('filesRefreshBtn')
-var filesLoadVaultBtn = document.getElementById('filesLoadVaultBtn')
 var filesContributeBtn = document.getElementById('filesContributeBtn')
 var filesIntegrateBtn = document.getElementById('filesIntegrateBtn')
 var filesPublishBtn = document.getElementById('filesPublishBtn')
@@ -3280,6 +3277,22 @@ function filesCurrentScope() {
   return filesScopeEl && filesScopeEl.value
     ? { type: 'cluster', id: filesScopeEl.value }
     : null
+}
+
+function filesCurrentFile() {
+  if (!filesVaultFileEl || !filesVaultFileEl.value) return null
+  var name = filesVaultFileEl.value
+  return ((_unlockedVault && _unlockedVault.files) || []).find(function (f) {
+    return f && (f.name === name || f.path === name)
+  }) || null
+}
+
+function filesCurrentFileId() {
+  var f = filesCurrentFile()
+  if (!f) return ''
+  if (f.file_id) return f.file_id
+  var name = f.name || f.path || ''
+  return String(name).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 100)
 }
 
 function filesNoScope(text) {
@@ -3318,7 +3331,7 @@ function filesRenderVaultFiles() {
   filesVaultFileEl.innerHTML = ''
   var empty = document.createElement('option')
   empty.value = ''
-  empty.textContent = '—'
+  empty.textContent = filesT('files.select_file', 'Sélectionne un fichier de référence.')
   filesVaultFileEl.appendChild(empty)
   var files = ((_unlockedVault && _unlockedVault.files) || []).filter(function (f) {
     if (!f || typeof f.content !== 'string') return false
@@ -3327,7 +3340,8 @@ function filesRenderVaultFiles() {
   })
   if (!files.length) {
     empty.textContent = filesT('files.no_file', 'Aucun fichier de référence pour ce scope.')
-    if (keep) filesVaultFileEl.value = ''
+    filesVaultFileEl.value = ''
+    if (filesContentEl) filesContentEl.value = ''
     return
   }
   files.forEach(function (f) {
@@ -3340,7 +3354,10 @@ function filesRenderVaultFiles() {
     filesVaultFileEl.appendChild(o)
   })
   if (keep) filesVaultFileEl.value = keep
-  if (!filesVaultFileEl.value) filesVaultFileEl.value = ''
+  if (!filesVaultFileEl.value) {
+    filesVaultFileEl.value = ''
+    if (filesContentEl) filesContentEl.value = ''
+  }
 }
 
 function filesLoadScopes(relations) {
@@ -3398,13 +3415,9 @@ function filesRender(state) {
   if (filesSnapshotEl) {
     filesSnapshotEl.value = state && state.snapshot ? state.snapshot.content : ''
   }
-  if (filesContentEl) {
-    filesContentEl.value = state && state.snapshot ? state.snapshot.content : ''
-  }
   if (filesVersionEl) {
     if (state && state.manifest && state.manifest.version > 0) {
-      filesVersionEl.textContent = 'v' + state.manifest.version +
-        (state.manifest.head && state.manifest.head.hash ? ' · ' + state.manifest.head.hash : '')
+      filesVersionEl.textContent = 'v' + state.manifest.version
     } else {
       filesVersionEl.textContent = filesT('files.no_snapshot', 'Aucun snapshot publié.')
     }
@@ -3442,10 +3455,10 @@ function filesRender(state) {
 
 function filesLoad() {
   var scope = filesCurrentScope()
-  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  var fileId = filesCurrentFileId()
   if (!_unlockedVault) { filesSetStatus(filesT('files.unlock', 'Ouvrez votre passport.')); return }
   if (!scope) { filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.')); return }
-  if (!fileId) { filesSetStatus(filesT('files.file_required', 'Identifiant requis.')); return }
+  if (!fileId) { filesSetStatus(filesT('files.select_file', 'Sélectionne un fichier de référence.')); return }
   filesSetStatus(filesT('files.loading', 'Chargement…'), true)
   _selfSignedBody('files', 'state', { file_id: fileId }, scope, SPID_SWITCH_HOST)
     .then(function (resp) { return resp.text().then(function (t) {
@@ -3466,14 +3479,13 @@ function filesLoad() {
 }
 
 function filesLoadVaultFile() {
-  if (!filesVaultFileEl) return
-  var name = filesVaultFileEl.value
-  var f = ((_unlockedVault && _unlockedVault.files) || []).find(function (x) {
-    return x && (x.name === name || x.path === name)
-  })
-  if (!f) return
-  if (filesFileIdEl && f.file_id) filesFileIdEl.value = f.file_id
+  var f = filesCurrentFile()
+  if (!f) {
+    if (filesContentEl) filesContentEl.value = ''
+    return
+  }
   if (filesContentEl) filesContentEl.value = f.content || ''
+  filesLoad()
 }
 
 function filesIntegrateChecked() {
@@ -3517,7 +3529,7 @@ function filesSaveVaultReference(name, content, fileId, version, hash, scope) {
 
 function filesContribute() {
   var scope = filesCurrentScope()
-  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  var fileId = filesCurrentFileId()
   var content = filesContentEl ? filesContentEl.value : ''
   if (!scope || !fileId) { filesSetStatus(filesT('files.scope_required', 'Choisis un cluster et un identifiant.')); return }
   if (!content) { filesSetStatus(filesT('files.content_required', 'Contenu requis.')); return }
@@ -3542,7 +3554,7 @@ function filesContribute() {
 
 function filesPublish() {
   var scope = filesCurrentScope()
-  var fileId = filesFileIdEl && filesFileIdEl.value ? filesFileIdEl.value.trim() : ''
+  var fileId = filesCurrentFileId()
   var content = filesContentEl ? filesContentEl.value : ''
   if (!scope || !fileId) { filesSetStatus(filesT('files.scope_required', 'Choisis un cluster et un identifiant.')); return }
   if (!content) { filesSetStatus(filesT('files.content_required', 'Contenu requis.')); return }
@@ -3577,21 +3589,14 @@ function filesPublish() {
     .catch(function (e) { filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e)) })
 }
 
-function filesRefresh() {
-  filesRenderVaultFiles()
-  filesLoad()
-}
-
-if (filesRefreshBtn) filesRefreshBtn.addEventListener('click', filesRefresh)
-if (filesLoadVaultBtn) filesLoadVaultBtn.addEventListener('click', filesLoadVaultFile)
 if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContribute)
 if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
 if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
+if (filesVaultFileEl) filesVaultFileEl.addEventListener('change', filesLoadVaultFile)
 if (filesScopeEl) filesScopeEl.addEventListener('change', function () {
   filesRenderVaultFiles()
   filesLoad()
 })
-if (filesFileIdEl) filesFileIdEl.addEventListener('change', filesLoad)
 if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
 
 // ═════════════════════════════════════════════════════════════════════════
