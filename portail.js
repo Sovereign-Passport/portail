@@ -3546,9 +3546,12 @@ function filesRender(state) {
     filesPendingEl.appendChild(none)
     return
   }
+  var me = _holderDid()
+  var owner = state && state.manifest && state.manifest.owner_did
   pending.forEach(function (p) {
     var row = document.createElement('div'); row.className = 'bb-row'
     var left = document.createElement('div')
+    left.style.cssText = 'flex:1;min-width:0;'
     var label = document.createElement('label')
     label.style.cssText = 'display:flex;align-items:center;gap:8px;'
     var check = document.createElement('input')
@@ -3563,7 +3566,18 @@ function filesRender(state) {
     body.style.cssText = 'white-space:pre-wrap;font-size:11px;color:var(--ink-dim);max-height:140px;overflow:auto;margin:6px 0 0;'
     body.textContent = p.content || ''
     left.appendChild(label); left.appendChild(meta); left.appendChild(body)
-    row.appendChild(left)
+    if (!owner || me === owner || p.created_by_did === me) {
+      var remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'btn btn-ghost'
+      remove.style.cssText = 'width:auto;padding:5px 10px;font-size:10px;margin:0;flex:0 0 auto;'
+      remove.textContent = filesT('files.remove', 'Retirer')
+      remove.addEventListener('click', function () { filesRemovePending(p.proposal_id) })
+      row.appendChild(left)
+      row.appendChild(remove)
+    } else {
+      row.appendChild(left)
+    }
     filesPendingEl.appendChild(row)
   })
 }
@@ -3651,6 +3665,43 @@ function filesIntegrateChecked() {
   _filesIntegrated = [chosen.proposal_id]
   filesContentEl.value = chosen.content || ''
   filesSetStatus(filesT('files.integrated', 'Ajout intégré dans le contenu. Vérifie puis publie.'))
+}
+
+function filesRemovePending(proposalId) {
+  var scope = filesCurrentScope()
+  var fileId = filesCurrentFileId()
+  if (!scope || !fileId || !proposalId) {
+    filesSetStatus(filesT('files.scope_required', 'Choisis un Cluster et un fichier de référence.'))
+    return
+  }
+  filesSetStatus(filesT('files.removing', 'Retrait…'), true)
+  _selfSignedBody('files', 'remove', {
+    file_id: fileId, proposal_id: proposalId,
+  }, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return d
+    })})
+    .then(function () {
+      if (_filesState && _filesState.pending) {
+        _filesState.pending = _filesState.pending.filter(function (p) {
+          return p && p.proposal_id !== proposalId
+        })
+      }
+      var integrated = (_filesIntegrated || []).filter(function (id) {
+        return id !== proposalId
+      })
+      filesRender(_filesState)
+      _filesIntegrated = integrated
+      filesSetStatus(filesT('files.removed', 'Ajout retiré.'))
+      return filesListPublished(scope)
+    })
+    .catch(function (e) {
+      filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e))
+    })
 }
 
 function filesSaveVaultReference(name, content, fileId, version, hash, scope) {
