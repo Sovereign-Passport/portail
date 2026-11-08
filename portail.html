@@ -44,8 +44,6 @@
                 aria-controls="panel-billboard" aria-selected="false" data-service="billboard" tabindex="-1">Billboard</button>
         <button class="tab" id="tab-calendar" role="tab" type="button"
                 aria-controls="panel-calendar" aria-selected="false" data-service="calendar" tabindex="-1">Calendar</button>
-        <button class="tab" id="tab-budget" role="tab" type="button"
-                aria-controls="panel-budget" aria-selected="false" data-service="budget" tabindex="-1" data-i18n="budget.tab">Budget</button>
         <button class="tab" id="tab-messages" role="tab" type="button"
                 aria-controls="panel-messages" aria-selected="false" data-service="messages" tabindex="-1">Messages<span class="tab-dot" id="msgDot" style="display:none"></span></button>
         <button class="tab" id="tab-relations" role="tab" type="button"
@@ -88,6 +86,16 @@
         <!-- Assist conversation — planner + signed execution (after unlock) -->
         <div class="divider" id="assistDivider" style="display:none">conversation</div>
         <div class="field" id="assistField" style="display:none">
+          <div id="assistFileBindingRow" class="bb-note" style="display:none; margin-bottom:8px;">
+            <div id="assistFileBindingText"></div>
+            <details id="assistFilePromptDetails" style="display:none; margin-top:6px;">
+              <summary data-i18n="files.prompt_active">Prompt actif</summary>
+              <pre id="assistFilePrompt" style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:6px 0 0;"></pre>
+            </details>
+            <button class="btn btn-ghost" id="assistFileClear" type="button"
+                    style="width:auto;padding:5px 10px;font-size:10px;margin:8px 0 0;"
+                    data-i18n="files.clear_assist">Retirer le fichier</button>
+          </div>
           <textarea id="assistInput" class="bb-textarea" rows="3"
                     placeholder="Écrivez votre demande (ou enregistrez un court message)…"></textarea>
           <div class="bb-actions" style="margin-top:8px;">
@@ -189,19 +197,6 @@
         </div>
       </section>
 
-      <section class="tab-panel" id="panel-budget" role="tabpanel" aria-labelledby="tab-budget" tabindex="0" hidden>
-        <div class="ms-bar">
-          <button class="btn btn-ghost" id="budgetRefreshBtn" type="button" data-i18n="budget.refresh">↻ Rafraîchir</button>
-          <button class="btn btn-ghost" id="budgetReconcileBtn" type="button" data-i18n="budget.reconcile">Réconcilier</button>
-        </div>
-        <div id="budgetStatus" class="bb-status" style="display:none;"></div>
-        <div class="field">
-          <label data-i18n="budget.scope">Portée</label>
-          <select id="budgetScope" class="bb-select"></select>
-        </div>
-        <div id="budgetSummary" class="bb-list"></div>
-      </section>
-
       <section class="tab-panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" tabindex="0" hidden>
         <div class="ms-bar">
           <button class="btn btn-ghost" id="msInboxBtn" type="button" aria-pressed="true" data-i18n="messages.inbox">Boîte</button>
@@ -299,6 +294,20 @@
           <textarea id="filesSnapshot" class="bb-textarea" rows="8" readonly></textarea>
         </div>
 
+        <div class="field" id="filesPromptField" style="display:none;">
+          <label data-i18n="files.assist_prompt">Prompt Assist du fichier</label>
+          <textarea id="filesPrompt" class="bb-textarea" rows="4"
+                    data-i18n-placeholder="files.prompt_placeholder"
+                    placeholder="Décris comment Assist doit modifier ce fichier…"></textarea>
+          <div class="bb-actions" style="margin-top:6px;">
+            <button class="btn btn-ghost" id="filesPromptSaveBtn" type="button"
+                    data-i18n="files.prompt_save">Enregistrer le prompt</button>
+            <button class="btn btn-ghost" id="filesUseAssistBtn" type="button"
+                    data-i18n="files.use_assist">Utiliser avec Assist</button>
+          </div>
+          <p id="filesPromptNote" class="bb-note" data-i18n="files.prompt_note">Seul le propriétaire peut modifier ce prompt.</p>
+        </div>
+
         <div class="field">
           <label data-i18n="files.pending">Ajouts en attente</label>
           <div id="filesPending" class="bb-list"></div>
@@ -329,9 +338,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=18"></script>
+<script src="i18n/catalogs.js?v=19"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=75"></script>
+<script src="portail.js?v=76"></script>
 </body>
 </html>

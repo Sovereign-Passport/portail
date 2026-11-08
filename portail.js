@@ -409,7 +409,6 @@ function afterAccess() {
     updateBillboardComposer()
     assistInit()
     calendarReset()
-    if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budgetInit()
     msUpdateDot()
   })
 }
@@ -1725,7 +1724,7 @@ updateBillboardComposer()
 // No secret, DID or authorization is ever accepted from the URL.
 // ═════════════════════════════════════════════════════════════════════════
 
-var SERVICES = ['assist', 'billboard', 'calendar', 'budget', 'messages', 'relations', 'files']
+var SERVICES = ['assist', 'billboard', 'calendar', 'messages', 'relations', 'files']
 var DEFAULT_SERVICE = 'assist'
 
 var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
@@ -1759,9 +1758,6 @@ function activateService(name) {
   }
   if (target === 'calendar') {
     calendarInit()
-  }
-  if (target === 'budget') {
-    budgetInit()
   }
   if (target === 'messages') {
     msInit()
@@ -1854,7 +1850,7 @@ if (_isReload) {
 //
 // Text -> Switchboard 'assist/plan' (planner, no execution) -> clarification
 // or confirmation -> on confirm, the Passport signs EACH action through the
-// Switchboard (calendar/messages/budget/checklist). Nothing runs server-side.
+// Switchboard (calendar/messages/checklist). Nothing runs server-side.
 // ═════════════════════════════════════════════════════════════════════════
 
 // UI language: localStorage override → browser preference → EN (default).
@@ -1895,72 +1891,6 @@ function spidPersistLang(l) {
   }).catch(function () {})
 }
 
-/**
- * Store a reconciled Budget snapshot as a new encrypted vault file.
- * The snapshot is versioned by file name; the vault remains the sole owner.
- */
-function saveBudgetSnapshotToVault(snapshot, fileName, clusterId, version, hash) {
-  if (!_unlockedVault || !_vaultKey || !_storedPayload || !_storedPayload.salt) {
-    return Promise.reject(new Error('vault locked or base payload missing'))
-  }
-  var vault = _unlockedVault
-  if (!vault.files) vault.files = []
-  var content = JSON.stringify(snapshot, null, 2)
-  if (content.length > 2 * 1024 * 1024) {
-    return Promise.reject(new Error('budget snapshot exceeds the 2 MB vault text limit'))
-  }
-  var entry = {
-    name: fileName,
-    path: fileName,
-    mime: 'application/json',
-    visibility: 'private',
-    date: new Date().toLocaleDateString('en-CA'),
-    size: `${Math.round(content.length / 1024 * 10) / 10}kb`,
-    content: content,
-    kind: 'budget-snapshot',
-    cluster_id: clusterId,
-    version: version,
-    hash: hash,
-  }
-  var idx = vault.files.findIndex(function (f) { return f && f.name === fileName })
-  if (idx >= 0) vault.files[idx] = entry
-  else vault.files.push(entry)
-
-  return encryptVault(_vaultKey, JSON.stringify(vault)).then(function (e) {
-    var next = Object.assign({}, _storedPayload, {
-      key: 'current', iv: e.iv, ciphertext: e.ciphertext,
-      did: vault.identity.id, updated_at: nowIso(),
-    })
-    return persistVault(next).then(function () { _storedPayload = next; return entry })
-  })
-}
-
-/**
- * Prepare the snapshot, save it in the vault, then commit DB reconciliation.
- * The user confirmation is the plan/button confirmation before this call.
- */
-function budgetReconcileAndSave(scope) {
-  return _assistSignedBody('budget', 'reconcile', {}, scope, SPID_SWITCH_HOST)
-    .then(function (resp) { return resp.text().then(function (t) {
-      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-      if (!resp.ok || !d || !d.ok || !d.snapshot || !d.file_name || !d.version || !d.hash) {
-        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
-      }
-      return saveBudgetSnapshotToVault(d.snapshot, d.file_name, scope.id, d.version, d.hash)
-        .then(function () {
-          return _assistSignedBody('budget', 'reconcile/commit',
-            { version: d.version, hash: d.hash }, scope, SPID_SWITCH_HOST)
-        })
-        .then(function (commitResp) { return commitResp.text().then(function (ct) {
-          var cd = null; try { cd = JSON.parse(ct) } catch (e) { cd = null }
-          if (!commitResp.ok || !cd || !cd.ok) {
-            throw new Error((cd && (cd.error || cd.message)) || ('commit HTTP ' + commitResp.status))
-          }
-          return d
-        })})
-    })})
-}
-
 var assistDivider = document.getElementById('assistDivider')
 var assistField   = document.getElementById('assistField')
 var assistInput   = document.getElementById('assistInput')
@@ -1971,10 +1901,17 @@ var assistStatus  = document.getElementById('assistStatus')
 var assistLog     = document.getElementById('assistLog')
 var assistPlanBox = document.getElementById('assistPlanBox')
 
+var assistFileBindingRow = document.getElementById('assistFileBindingRow')
+var assistFileBindingText = document.getElementById('assistFileBindingText')
+var assistFilePromptDetails = document.getElementById('assistFilePromptDetails')
+var assistFilePrompt = document.getElementById('assistFilePrompt')
+var assistFileClear = document.getElementById('assistFileClear')
+
 var _assistDraft   = ''    // original request, kept across a clarification
 var _assistPending = null  // plan awaiting confirmation
 var _assistPlanScope = null // scope used by the current plan
 var _assistPlanHost  = null // Switchboard host used by the current plan
+var _assistFileBinding = null // optional {scope, fileId, name, version, prompt, content}
 
 /** Only these contextual relations can use the Assist planner. */
 function _rightsAllowAssist(rights) {
@@ -1989,6 +1926,84 @@ function assistInit() {
   assistDivider.style.display = 'flex'
   assistField.style.display   = 'block'
   assistSetReady(_rightsAllowAssist(_accessRights))
+}
+
+function assistRenderFileBinding() {
+  if (!assistFileBindingRow) return
+  var b = _assistFileBinding
+  if (!b) {
+    assistFileBindingRow.style.display = 'none'
+    return
+  }
+  assistFileBindingRow.style.display = 'block'
+  if (assistFileBindingText) {
+    assistFileBindingText.textContent = filesT('files.assist_binding', 'Fichier actif :') +
+      ' ' + (b.name || b.fileId) + ' · v' + (b.version || 0)
+  }
+  var prompt = b.prompt || ''
+  if (assistFilePromptDetails) {
+    assistFilePromptDetails.style.display = prompt ? 'block' : 'none'
+  }
+  if (assistFilePrompt) assistFilePrompt.textContent = prompt
+}
+
+function assistClearFileBinding() {
+  _assistFileBinding = null
+  assistRenderFileBinding()
+}
+
+function filesUseAssist() {
+  var scope = filesCurrentScope()
+  var fileId = filesCurrentFileId()
+  if (!scope || !fileId) {
+    filesSetStatus(filesT('files.scope_required', 'Choisis un Cluster et un fichier de référence.'))
+    return
+  }
+  if (!_filesState || !_filesState.manifest) {
+    filesSetStatus(filesT('files.prompt_unpublished',
+      'Publie d’abord un snapshot pour définir le prompt.'))
+    return
+  }
+  var m = _filesState.manifest
+  var selected = filesSelectedOption()
+  _assistFileBinding = {
+    scope: scope,
+    fileId: fileId,
+    name: m.name || (selected && selected.dataset && selected.dataset.name) || fileId,
+    version: m.version || 0,
+    prompt: m.assist_prompt || '',
+    content: filesContentEl ? filesContentEl.value : '',
+  }
+  assistRenderFileBinding()
+  activateService('assist')
+  assistSetReady(true)
+  if (assistInput) assistInput.focus()
+}
+
+function _assistFileContext() {
+  var b = _assistFileBinding
+  if (!b) return null
+  var prompt = b.prompt || ''
+  var content = b.content || ''
+  var version = b.version || 0
+  var currentScope = filesCurrentScope()
+  if (filesCurrentFileId() === b.fileId && currentScope && currentScope.id === b.scope.id) {
+    if (filesContentEl) content = filesContentEl.value
+    if (_filesState && _filesState.manifest) {
+      prompt = _filesState.manifest.assist_prompt || ''
+      version = _filesState.manifest.version || version
+    }
+  }
+  return {
+    file: {
+      file_id: b.fileId,
+      name: b.name,
+      version: version,
+      scope: b.scope,
+      assist_prompt: prompt,
+      content: content,
+    },
+  }
 }
 
 function assistLine(text) {
@@ -2181,6 +2196,16 @@ function assistRenderPlan(plan) {
     var row = document.createElement('div'); row.className = 'bb-confirm-row'
     row.innerHTML = '<span>' + (a.service || '?') + '</span><strong>' + (a.action || '') + '</strong>'
     assistPlanBox.appendChild(row)
+    if (a.service === 'files' && a.data && typeof a.data.content === 'string') {
+      var note = document.createElement('p'); note.className = 'bb-note'
+      note.textContent = filesT('files.assist_proposed', 'Version proposée (non publiée)') +
+        ' · ' + (a.data.file_id || '')
+      var preview = document.createElement('pre')
+      preview.style.cssText = 'white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px;'
+      preview.textContent = a.data.content
+      assistPlanBox.appendChild(note)
+      assistPlanBox.appendChild(preview)
+    }
   })
 
   if (plan.status === 'needs_confirmation' && actions.length) {
@@ -2276,14 +2301,13 @@ function assistConfirm(plan) {
   var results = []
   var touchedCalendar = false
   var touchedChecklist = false
-  var touchedBudget = false
+  var touchedFiles = false
+  var touchedFileId = null
   actions.forEach(function (a) {
     chain = chain.then(function () {
-      if (a.service === 'budget') touchedBudget = true
-      if (a.service === 'budget' && a.action === 'reconcile') {
-        return budgetReconcileAndSave(sc)
-          .then(function (d) { results.push('budget/reconcile → OK · ' + d.file_name) })
-          .catch(function (e) { results.push('budget/reconcile → erreur (' + e.message + ')') })
+      if (a.service === 'files') {
+        touchedFiles = true
+        touchedFileId = (a.data || {}).file_id || null
       }
       if (a.service === 'billboard' && a.action === 'checklist/update') {
         touchedChecklist = true
@@ -2337,8 +2361,9 @@ function assistConfirm(plan) {
         bbLoadChecklists({ cluster_id: sc.id }, SPID_SWITCH_HOST)
       }
     }
-    if (touchedBudget && servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) {
-      budgetLoad()
+    if (touchedFiles) {
+      if (touchedFileId && filesCurrentFileId() === touchedFileId) filesLoad()
+      if (filesCurrentScope()) filesListPublished(filesCurrentScope())
     }
   })
 }
@@ -2538,7 +2563,9 @@ function assistBillboardPostOp(a) {
 
 function assistSubmit(text) {
   if (!text || _assistBusy || !_assistAccessReady) return
-  var target = _assistTargetForText(text) || _assistSelectedTarget()
+  var target = _assistFileBinding
+    ? { scope: _assistFileBinding.scope, host: SPID_SWITCH_HOST }
+    : (_assistTargetForText(text) || _assistSelectedTarget())
   var scope = target ? target.scope : _assistScope()
   var host = target ? target.host : null
   _assistPlanScope = scope
@@ -2552,6 +2579,10 @@ function assistSubmit(text) {
       .catch(function () { return null })
   }
   contextPromise.then(function (context) {
+    var fileContext = _assistFileContext()
+    if (fileContext) {
+      context = Object.assign({}, context || {}, { file: fileContext.file })
+    }
     return _assistSignedBody('assist', 'plan',
       { text: text, scope: scope, lang: _uiLang(), context: context }, scope, host)
   })
@@ -2596,6 +2627,7 @@ function assistSend() {
 }
 
 assistSendBtn.addEventListener('click', assistSend)
+if (assistFileClear) assistFileClear.addEventListener('click', assistClearFileBinding)
 assistInput.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); assistSend() }
 })
@@ -3060,188 +3092,6 @@ if (calTodayBtn) calTodayBtn.addEventListener('click', calendarTodayGo)
 if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
 
 // ═════════════════════════════════════════════════════════════════════════
-// SECTION 7b — BUDGET (Cluster scope, working ledger)
-// The server keeps the collaborative ledger; reconciliation is a versioned
-// JSON snapshot written to the founder's did:key vault.
-// ═════════════════════════════════════════════════════════════════════════
-
-var budgetScopeEl   = document.getElementById('budgetScope')
-var budgetSummaryEl = document.getElementById('budgetSummary')
-var budgetStatusEl  = document.getElementById('budgetStatus')
-var budgetRefreshBtn = document.getElementById('budgetRefreshBtn')
-var budgetReconcileBtn = document.getElementById('budgetReconcileBtn')
-
-function _budgetText(key, fallback) {
-  return window.spidT ? spidT(key) : fallback
-}
-function budgetSetStatus(text, loading) {
-  if (!budgetStatusEl) return
-  budgetStatusEl.textContent = text || ''
-  budgetStatusEl.style.display = text ? 'block' : 'none'
-  budgetStatusEl.classList.toggle('loading', !!loading)
-}
-function budgetMoney(cents, currency) {
-  try {
-    return new Intl.NumberFormat(_uiLang(), {
-      style: 'currency', currency: currency || 'CAD',
-    }).format(Number(cents || 0) / 100)
-  } catch (e) {
-    return String((Number(cents || 0) / 100).toFixed(2)) + ' ' + (currency || '')
-  }
-}
-function budgetNoScope(text) {
-  if (!budgetScopeEl) return
-  budgetScopeEl.innerHTML = ''
-  var o = document.createElement('option')
-  o.value = ''; o.disabled = true; o.selected = true; o.textContent = text
-  budgetScopeEl.appendChild(o)
-}
-function budgetInit() {
-  if (!_unlockedVault) {
-    budgetNoScope(_budgetText('budget.unlock', 'Ouvrez votre passport.'))
-    budgetSetStatus(_budgetText('budget.unlock', 'Ouvrez votre passport.'))
-    if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
-    return
-  }
-  budgetLoadScopes()
-}
-function budgetCurrentScope() {
-  return budgetScopeEl && budgetScopeEl.value ? { type: 'cluster', id: budgetScopeEl.value } : null
-}
-function budgetLoadScopes() {
-  if (!budgetScopeEl) return
-  var keep = budgetScopeEl.value
-  var serverIds = {}
-  ;((_portalRelations && _portalRelations.clusters) || []).forEach(function (c) {
-    if (c && c.id && (c.cluster_status || 'active') === 'active') serverIds[c.id] = true
-  })
-  var clusters = buildClusterOptions(_unlockedVault, _portalRelations).filter(function (c) {
-    // Budget is a Switchboard Cluster service: keep only scopes known by the
-    // current relation projection, even when the Cluster has no Vine endpoint.
-    return !c.local_only && !!serverIds[c.cluster_id]
-  })
-  budgetScopeEl.innerHTML = ''
-  if (!clusters.length) {
-    budgetNoScope(_budgetText('budget.no_scope', 'Aucun Cluster disponible.'))
-    budgetSetStatus(_budgetText('budget.no_scope', 'Aucun Cluster disponible.'))
-    if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
-    return
-  }
-  clusters.forEach(function (c) {
-    var o = document.createElement('option')
-    o.value = c.cluster_id
-    o.textContent = c.label || c.name || c.cluster_id
-    budgetScopeEl.appendChild(o)
-  })
-  if (keep) budgetScopeEl.value = keep
-  if (!budgetScopeEl.value) budgetScopeEl.value = clusters[0].cluster_id
-  budgetLoad()
-}
-function budgetLoad() {
-  var scope = budgetCurrentScope()
-  if (!scope || !_unlockedVault) return
-  budgetSetStatus(_budgetText('budget.loading', 'Chargement…'), true)
-  _selfSignedBody('budget', 'report/summary', {}, scope, SPID_SWITCH_HOST)
-    .then(function (resp) { return resp.text().then(function (t) {
-      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
-      if (!resp.ok || !d || !d.ok) {
-        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
-      }
-      budgetSetStatus('')
-      budgetRenderSummary(d.summary || {})
-    })})
-    .catch(function (e) {
-      budgetSetStatus(_budgetText('budget.error', 'Budget indisponible : ') +
-        (e && e.message ? e.message : e))
-      if (budgetSummaryEl) budgetSummaryEl.innerHTML = ''
-    })
-}
-function budgetRenderSummary(summary) {
-  if (!budgetSummaryEl) return
-  budgetSummaryEl.innerHTML = ''
-  var byCurrency = summary.by_currency || []
-  var byCategory = summary.by_category || []
-  var byStatus = summary.by_status || []
-  if (!byCurrency.length && !byCategory.length) {
-    var empty = document.createElement('p')
-    empty.className = 'bb-empty'
-    empty.textContent = _budgetText('budget.no_data', 'Aucune donnée Budget.')
-    budgetSummaryEl.appendChild(empty)
-    return
-  }
-  var currencies = {}
-  byCurrency.forEach(function (r) {
-    var c = currencies[r.currency] || (currencies[r.currency] = { income: 0, expense: 0 })
-    if (r.kind === 'income') c.income += Number(r.amount_cents) || 0
-    if (r.kind === 'expense') c.expense += Number(r.amount_cents) || 0
-  })
-  Object.keys(currencies).sort().forEach(function (cur) {
-    var c = currencies[cur]
-    var card = document.createElement('div'); card.className = 'bb-post'
-    var title = document.createElement('div'); title.className = 'bb-title'
-    title.textContent = cur; card.appendChild(title)
-    var rows = [
-      [_budgetText('budget.income', 'Revenus'), c.income],
-      [_budgetText('budget.expense', 'Dépenses'), c.expense],
-      [_budgetText('budget.net', 'Net'), c.income - c.expense],
-    ]
-    rows.forEach(function (r) {
-      var row = document.createElement('div'); row.className = 'bb-row'
-      var label = document.createElement('span'); label.textContent = r[0]
-      var value = document.createElement('strong'); value.textContent = budgetMoney(r[1], cur)
-      row.appendChild(label); row.appendChild(value); card.appendChild(row)
-    })
-    budgetSummaryEl.appendChild(card)
-  })
-  if (byCategory.length) {
-    var card2 = document.createElement('div'); card2.className = 'bb-post'
-    var t2 = document.createElement('div'); t2.className = 'bb-title'
-    t2.textContent = _budgetText('budget.by_category', 'Par catégorie')
-    card2.appendChild(t2)
-    byCategory.forEach(function (r) {
-      var row = document.createElement('div'); row.className = 'bb-row'
-      var label = document.createElement('span')
-      label.textContent = (r.category_code || '—') + ' · ' +
-        (r.kind === 'income' ? _budgetText('budget.income', 'Revenus') : _budgetText('budget.expense', 'Dépenses'))
-      var value = document.createElement('strong')
-      value.textContent = budgetMoney(r.amount_cents, r.currency)
-      row.appendChild(label); row.appendChild(value); card2.appendChild(row)
-    })
-    budgetSummaryEl.appendChild(card2)
-  }
-  if (byStatus.length) {
-    var note = document.createElement('p'); note.className = 'bb-note'
-    note.textContent = _budgetText('budget.by_status', 'Par statut') + ' · ' +
-      byStatus.map(function (r) { return r.status + ':' + r.count }).join(' · ')
-    budgetSummaryEl.appendChild(note)
-  }
-}
-function budgetReconcile() {
-  var scope = budgetCurrentScope()
-  if (!scope) return
-  var msg = _budgetText('budget.confirm_reconcile',
-    'Créer un snapshot réconcilié dans votre vault ?')
-  if (typeof confirm === 'function' && !confirm(msg)) return
-  if (budgetReconcileBtn) budgetReconcileBtn.disabled = true
-  budgetSetStatus(_budgetText('budget.reconciling', 'Réconciliation…'), true)
-  budgetReconcileAndSave(scope)
-    .then(function (d) {
-      budgetSetStatus(_budgetText('budget.snapshot_saved', 'Snapshot sauvegardé : ') + d.file_name)
-      budgetLoad()
-    })
-    .catch(function (e) {
-      budgetSetStatus(_budgetText('budget.error', 'Budget indisponible : ') +
-        (e && e.message ? e.message : e))
-    })
-    .then(function () { if (budgetReconcileBtn) budgetReconcileBtn.disabled = false })
-}
-
-if (budgetRefreshBtn) budgetRefreshBtn.addEventListener('click', budgetLoadScopes)
-if (budgetReconcileBtn) budgetReconcileBtn.addEventListener('click', budgetReconcile)
-if (budgetScopeEl) budgetScopeEl.addEventListener('change', budgetLoad)
-if (servicePanels.budget && !servicePanels.budget.hasAttribute('hidden')) budgetInit()
-
-// ═════════════════════════════════════════════════════════════════════════
 // SECTION 7b — FILES (generic shared host; GitHub first adapter)
 // The file service is reached through the Switchboard. The owner keeps the
 // reference file in the vault; GitHub only receives published snapshots and
@@ -3256,6 +3106,11 @@ var filesPublishedNote = document.getElementById('filesPublishedNote')
 var filesSnapshotField = document.getElementById('filesSnapshotField')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
 var filesVersionTagEl = document.getElementById('filesVersionTag')
+var filesPromptField = document.getElementById('filesPromptField')
+var filesPromptEl = document.getElementById('filesPrompt')
+var filesPromptSaveBtn = document.getElementById('filesPromptSaveBtn')
+var filesPromptNote = document.getElementById('filesPromptNote')
+var filesUseAssistBtn = document.getElementById('filesUseAssistBtn')
 var filesPendingEl = document.getElementById('filesPending')
 var filesContentEl = document.getElementById('filesContent')
 var filesContributeBtn = document.getElementById('filesContributeBtn')
@@ -3319,6 +3174,12 @@ function filesClearState() {
   _filesIntegrated = []
   if (filesSnapshotField) filesSnapshotField.style.display = 'none'
   if (filesSnapshotEl) filesSnapshotEl.value = ''
+  if (filesPromptField) filesPromptField.style.display = 'none'
+  if (filesPromptEl) {
+    filesPromptEl.value = ''
+    filesPromptEl.readOnly = true
+  }
+  if (filesPromptSaveBtn) filesPromptSaveBtn.style.display = 'none'
   if (filesPendingEl) filesPendingEl.innerHTML = ''
   if (filesVersionTagEl) filesVersionTagEl.textContent = ''
 }
@@ -3537,6 +3398,29 @@ function filesRender(state) {
         ? '[' + 'v' + state.manifest.version + ']'
         : ''
   }
+  var manifest = state && state.manifest
+  var owner = manifest && manifest.owner_did
+  var canEditPrompt = !!owner && _holderDid() === owner
+  if (filesPromptField) filesPromptField.style.display = manifest ? 'block' : 'none'
+  if (filesPromptEl) {
+    filesPromptEl.value = manifest && typeof manifest.assist_prompt === 'string'
+      ? manifest.assist_prompt
+      : ''
+    filesPromptEl.readOnly = !canEditPrompt
+    filesPromptEl.style.opacity = canEditPrompt ? '1' : '0.68'
+  }
+  if (filesPromptSaveBtn) {
+    filesPromptSaveBtn.style.display = canEditPrompt ? 'inline-flex' : 'none'
+  }
+  if (_assistFileBinding && manifest &&
+      _assistFileBinding.fileId === manifest.file_id &&
+      _assistFileBinding.scope && filesScopeEl &&
+      _assistFileBinding.scope.id === filesScopeEl.value) {
+    _assistFileBinding.version = manifest.version || 0
+    _assistFileBinding.prompt = manifest.assist_prompt || ''
+    _assistFileBinding.name = manifest.name || _assistFileBinding.name
+    assistRenderFileBinding()
+  }
   if (!filesPendingEl) return
   filesPendingEl.innerHTML = ''
   var pending = state && state.pending ? state.pending : []
@@ -3719,6 +3603,45 @@ function filesSaveVaultReference(name, content, fileId, version, hash, scope) {
   return _persistLocalShares().catch(function () {})
 }
 
+function filesPromptSave() {
+  var scope = filesCurrentScope()
+  var fileId = filesCurrentFileId()
+  if (!scope || !fileId) {
+    filesSetStatus(filesT('files.scope_required', 'Choisis un Cluster et un fichier de référence.'))
+    return
+  }
+  if (!_filesState || !_filesState.manifest) {
+    filesSetStatus(filesT('files.prompt_unpublished',
+      'Publie d’abord un snapshot pour définir le prompt.'))
+    return
+  }
+  var prompt = filesPromptEl ? filesPromptEl.value : ''
+  filesSetStatus(filesT('files.saving', 'Enregistrement…'), true)
+  _selfSignedBody('files', 'prompt', {
+    file_id: fileId, prompt: prompt,
+  }, scope, SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
+      if (!resp.ok || !d || !d.ok) {
+        throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+      }
+      return d
+    })})
+    .then(function (d) {
+      if (_filesState && _filesState.manifest) {
+        _filesState.manifest.assist_prompt = d.assist_prompt || ''
+      }
+      if (_assistFileBinding && _assistFileBinding.fileId === fileId) {
+        _assistFileBinding.prompt = d.assist_prompt || ''
+        assistRenderFileBinding()
+      }
+      filesSetStatus(filesT('files.prompt_saved', 'Prompt enregistré.'))
+    })
+    .catch(function (e) {
+      filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e))
+    })
+}
+
 function filesContribute() {
   var scope = filesCurrentScope()
   var fileId = filesCurrentFileId()
@@ -3784,6 +3707,8 @@ function filesPublish() {
 }
 
 if (filesContributeBtn) filesContributeBtn.addEventListener('click', filesContribute)
+if (filesPromptSaveBtn) filesPromptSaveBtn.addEventListener('click', filesPromptSave)
+if (filesUseAssistBtn) filesUseAssistBtn.addEventListener('click', filesUseAssist)
 if (filesIntegrateBtn) filesIntegrateBtn.addEventListener('click', filesIntegrateChecked)
 if (filesPublishBtn) filesPublishBtn.addEventListener('click', filesPublish)
 function filesOnScopeChange() {
