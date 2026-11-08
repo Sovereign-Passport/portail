@@ -2183,7 +2183,16 @@ function assistRenderPlan(plan) {
     assistPlanBox.appendChild(capLine)
   }
 
-  if (plan.summary) assistLine(plan.summary)
+  if (plan.summary) {
+    if (typeof plan.summary === 'string') {
+      assistLine(plan.summary)
+    } else {
+      var summaryPre = document.createElement('pre')
+      summaryPre.style.cssText = 'white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px;'
+      summaryPre.textContent = JSON.stringify(plan.summary, null, 2)
+      assistPlanBox.appendChild(summaryPre)
+    }
+  }
   if (plan.question) {
     var q = document.createElement('p'); q.className = 'bb-note'
     q.textContent = '❓ ' + plan.question
