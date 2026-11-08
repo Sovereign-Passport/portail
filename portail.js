@@ -3268,17 +3268,32 @@ function filesRenderVaultFiles() {
     if (/^data:image\//i.test(f.content)) return false
     return true
   })
-  var localIds = {}
-  files.forEach(function (f) { localIds[_fileIdFor(f)] = true })
   var published = (_filesPublishedScope && filesScopeEl &&
     filesScopeEl.value === _filesPublishedScope ? _filesPublished : [])
-    .filter(function (p) { return p && p.file_id && !localIds[p.file_id] })
+    .filter(function (p) { return p && p.file_id })
 
   if (!files.length && !published.length) {
     empty.textContent = filesT('files.no_file', 'Aucun fichier de référence dans le Passport.')
     filesVaultFileEl.value = ''
     if (filesContentEl) filesContentEl.value = ''
     return
+  }
+  // The Cluster's published snapshots come first: they are the shared truth
+  // for members, even when the owner also has a local reference file.
+  if (published.length) {
+    var publishedGroup = document.createElement('optgroup')
+    publishedGroup.label = filesT('files.published_group', 'Fichiers publiés dans ce Cluster')
+    published.forEach(function (p) {
+      var o = document.createElement('option')
+      o.value = 'published:' + p.file_id
+      o.dataset.kind = 'published'
+      o.dataset.fileId = p.file_id
+      o.dataset.name = p.name || p.file_id
+      o.textContent = (p.name || p.file_id) + ' · ' +
+        filesT('files.published_version', 'publié v') + (p.version || 0)
+      publishedGroup.appendChild(o)
+    })
+    filesVaultFileEl.appendChild(publishedGroup)
   }
   if (files.length) {
     var localGroup = document.createElement('optgroup')
@@ -3294,21 +3309,6 @@ function filesRenderVaultFiles() {
       localGroup.appendChild(o)
     })
     filesVaultFileEl.appendChild(localGroup)
-  }
-  if (published.length) {
-    var publishedGroup = document.createElement('optgroup')
-    publishedGroup.label = filesT('files.published_group', 'Fichiers publiés dans ce Cluster')
-    published.forEach(function (p) {
-      var o = document.createElement('option')
-      o.value = 'published:' + p.file_id
-      o.dataset.kind = 'published'
-      o.dataset.fileId = p.file_id
-      o.dataset.name = p.name || p.file_id
-      o.textContent = (p.name || p.file_id) + ' · ' +
-        filesT('files.published_version', 'publié v') + (p.version || 0)
-      publishedGroup.appendChild(o)
-    })
-    filesVaultFileEl.appendChild(publishedGroup)
   }
   if (keep) filesVaultFileEl.value = keep
   if (!filesVaultFileEl.value) {
