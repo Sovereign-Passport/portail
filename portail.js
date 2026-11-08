@@ -2561,8 +2561,38 @@ function assistBillboardPostOp(a) {
   })
 }
 
+function _assistHasFileIntent(text) {
+  return /(fichier|\bfile\b|budget|csv|\bMAN-|mandalin)/i.test(text || '')
+}
+
+function _assistAutoBindCurrentFile(text) {
+  if (_assistFileBinding) return true
+  if (!_assistHasFileIntent(text)) return true
+  var scope = filesCurrentScope()
+  var fileId = filesCurrentFileId()
+  if (!scope || !fileId || !_filesState || !_filesState.manifest) {
+    assistLine(filesT('files.assist_select_file',
+      'Sélectionne d’abord un fichier dans l’onglet Fichiers, puis clique « Utiliser avec Assist ».'))
+    return false
+  }
+  var m = _filesState.manifest
+  var selected = filesSelectedOption()
+  _assistFileBinding = {
+    scope: scope,
+    fileId: fileId,
+    name: m.name || (selected && selected.dataset && selected.dataset.name) || fileId,
+    version: m.version || 0,
+    prompt: m.assist_prompt || '',
+    content: filesContentEl ? filesContentEl.value : '',
+  }
+  assistRenderFileBinding()
+  assistSetReady(true)
+  return true
+}
+
 function assistSubmit(text) {
   if (!text || _assistBusy || !_assistAccessReady) return
+  if (!_assistAutoBindCurrentFile(text)) return
   var target = _assistFileBinding
     ? { scope: _assistFileBinding.scope, host: SPID_SWITCH_HOST }
     : (_assistTargetForText(text) || _assistSelectedTarget())
