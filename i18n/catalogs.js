@@ -286,7 +286,13 @@ window.SPID_I18N_CATALOG = {
     "files.integrated": "Contribution integrated into the content. Review, then publish.",
     "files.select_one": "Select exactly one contribution to integrate.",
     "files.no_pending_selected": "No addition selected.",
-    "files.published": "Snapshot published ✓"
+    "files.published": "Snapshot published ✓",
+    "pwa.install": "Install app",
+    "pwa.ios": "Add to Home Screen",
+    "pwa.title": "Install app",
+    "pwa.close": "Close",
+    "pwa.ios_help": "Open Safari’s Share menu, then choose “Add to Home Screen”.",
+    "pwa.desktop_help": "Use the install icon in the browser address bar."
   },
   "fr": {
     "ui.0": "Passeport Souverain",
@@ -574,7 +580,13 @@ window.SPID_I18N_CATALOG = {
     "files.integrated": "Ajout intégré dans le contenu. Vérifie puis publie.",
     "files.select_one": "Sélectionne un seul ajout à intégrer.",
     "files.no_pending_selected": "Aucun ajout coché.",
-    "files.published": "Snapshot publié ✓"
+    "files.published": "Snapshot publié ✓",
+    "pwa.install": "Installer l’application",
+    "pwa.ios": "Ajouter à l’écran d’accueil",
+    "pwa.title": "Installer l’application",
+    "pwa.close": "Fermer",
+    "pwa.ios_help": "Ouvrez le menu Partager de Safari, puis choisissez « Sur l’écran d’accueil ».",
+    "pwa.desktop_help": "Utilisez l’icône d’installation de la barre d’adresse du navigateur."
   },
   "es": {
     "ui.0": "Pasaporte Soberano",
@@ -862,6 +874,12 @@ window.SPID_I18N_CATALOG = {
     "files.integrated": "Aporte integrado en el contenido. Revisa y publica.",
     "files.select_one": "Selecciona un solo aporte para integrar.",
     "files.no_pending_selected": "Ningún aporte marcado.",
-    "files.published": "Snapshot publicado ✓"
+    "files.published": "Snapshot publicado ✓",
+    "pwa.install": "Instalar la aplicación",
+    "pwa.ios": "Añadir a la pantalla de inicio",
+    "pwa.title": "Instalar la aplicación",
+    "pwa.close": "Cerrar",
+    "pwa.ios_help": "Abre el menú Compartir de Safari y elige «Añadir a pantalla de inicio».",
+    "pwa.desktop_help": "Usa el icono de instalación de la barra de direcciones del navegador."
   }
 };
