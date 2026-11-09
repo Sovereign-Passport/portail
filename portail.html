@@ -36,6 +36,14 @@
         </div>
       </div>
 
+      <!-- One shared scope selector for every service tab. -->
+      <div class="portal-scope-bar">
+        <label for="portalScope" data-i18n="app.scope">Portée</label>
+        <select id="portalScope" class="bb-select" disabled>
+          <option value="" disabled selected data-i18n="app.scope_locked">Ouvre ton Passport</option>
+        </select>
+      </div>
+
       <!-- Service tabs — Assist is the default active service -->
       <div class="tabs" role="tablist" aria-label="Sovereign Passport services" data-i18n-aria-label="app.services_label">
         <button class="tab" id="tab-assist" role="tab" type="button"
@@ -127,7 +135,7 @@
       <!-- Billboard — a Cluster selected from the unlocked Passport vault -->
       <section class="tab-panel" id="panel-billboard" role="tabpanel" aria-labelledby="tab-billboard" tabindex="0" hidden>
 
-        <div class="field bb-cluster-field" id="bbClusterField">
+        <div class="field bb-cluster-field" id="bbClusterField" style="display:none;">
           <label for="bbClusterSelect">Cluster</label>
           <select id="bbClusterSelect" class="bb-select"></select>
         </div>
@@ -192,6 +200,7 @@
             <button class="agenda-nav" id="calNext" type="button" aria-label="Mois suivant">›</button>
             <button class="btn btn-ghost agenda-today" id="calToday" type="button">Aujourd'hui</button>
           </div>
+          <p id="calScopeLabel" class="bb-note"></p>
           <div class="agenda-strip" id="calStrip"></div>
           <div class="agenda-list" id="calList"></div>
         </div>
@@ -203,6 +212,7 @@
           <button class="btn btn-ghost" id="msSentBtn" type="button" aria-pressed="false" data-i18n="messages.sent">Envoyés</button>
           <button class="btn btn-ghost" id="msRefreshBtn" type="button">&#8635;</button>
         </div>
+        <p class="bb-note" data-i18n="messages.did_scope">Messages stay tied to your DID; the shared scope does not change the mailbox.</p>
         <div id="msStatus" class="bb-status" style="display:none;"></div>
         <div id="msList" class="bb-list"></div>
 
@@ -233,7 +243,7 @@
         </div>
         <div id="relStatus" class="bb-status" style="display:none;"></div>
 
-        <div class="field">
+        <div class="field" id="relScopeField" style="display:none;">
           <label data-i18n="relations.scope">Portée</label>
           <select id="relScope" class="bb-select"></select>
         </div>
@@ -277,10 +287,7 @@
       </section>
 
       <section class="tab-panel" id="panel-files" role="tabpanel" aria-labelledby="tab-files" tabindex="0" hidden>
-        <div class="field">
-          <label data-i18n="files.scope">Cluster</label>
-          <select id="filesScope" class="bb-select"></select>
-        </div>
+
         <div class="field">
           <label data-i18n="files.from_passport">Fichier de référence (Passport ou fichier publié du Cluster)</label>
           <p id="filesScopeLabel" class="bb-note"></p>
@@ -291,12 +298,12 @@
         <div class="field" id="filesSnapshotField" style="display:none;">
           <label><span data-i18n="files.snapshot">Dernier snapshot publié</span>
             <span id="filesVersionTag" class="bb-note" style="margin-left:6px;"></span></label>
-          <textarea id="filesSnapshot" class="bb-textarea" rows="8" readonly></textarea>
+          <textarea id="filesSnapshot" class="bb-textarea files-code-area" rows="8" wrap="off" readonly></textarea>
         </div>
 
         <div class="field" id="filesPromptField" style="display:none;">
           <label data-i18n="files.assist_prompt">Prompt Assist du fichier</label>
-          <textarea id="filesPrompt" class="bb-textarea" rows="4"
+          <textarea id="filesPrompt" class="bb-textarea files-prompt-area" rows="4"
                     data-i18n-placeholder="files.prompt_placeholder"
                     placeholder="Décris comment Assist doit modifier ce fichier…"></textarea>
           <div class="bb-actions" style="margin-top:6px;">
@@ -315,7 +322,7 @@
 
         <div class="field">
           <label data-i18n="files.content">Contenu / intégration</label>
-          <textarea id="filesContent" class="bb-textarea" rows="10"
+          <textarea id="filesContent" class="bb-textarea files-code-area" rows="10" wrap="off"
                     data-i18n-placeholder="files.content_placeholder"
                     placeholder="Écris ou colle le contenu du fichier…"></textarea>
         </div>
@@ -338,9 +345,9 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=22"></script>
+<script src="i18n/catalogs.js?v=23"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=79"></script>
+<script src="portail.js?v=80"></script>
 </body>
 </html>

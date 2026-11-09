@@ -406,6 +406,7 @@ function afterAccess() {
   return loadPortalRelations().then(function() {
     return bbPullAndImport()
   }).then(function() {
+    portalScopeInit()
     updateBillboardComposer()
     assistInit()
     calendarReset()
@@ -476,6 +477,7 @@ unlockBtn.addEventListener('click', function() {
       _unlockedVault = result.vault
       _vaultKey      = result.vaultKey
       if (!Array.isArray(_unlockedVault.shareGrants)) _unlockedVault.shareGrants = []
+      portalScopeInit()
       try {
         var vlang = _unlockedVault.prefs && _unlockedVault.prefs.lang
         var llang = null
@@ -719,6 +721,19 @@ function bbRenderClusterSelect(preferredId) {
     opt.textContent = c.label
     bbClusterSelect.appendChild(opt)
   })
+  // The global scope is authoritative for the visible Billboard tab.
+  var gs = portalCurrentScope()
+  var globalValue = null
+  if (gs) {
+    if (gs.type === 'cluster') {
+      if (_bbClusters.some(function (c) { return c.cluster_id === gs.id })) globalValue = gs.id
+      else globalValue = '__public__'
+    } else if (gs.type === 'vine') {
+      globalValue = '__vine__'
+    } else {
+      globalValue = '__public__'
+    }
+  }
   // Non-level (public) announcements — always offered in the same select.
   var pub = document.createElement('option')
   pub.value = '__public__'
@@ -729,6 +744,10 @@ function bbRenderClusterSelect(preferredId) {
   vine.value = '__vine__'
   vine.textContent = '— Vine — annonces de la communauté —'
   bbClusterSelect.appendChild(vine)
+  if (globalValue) {
+    bbClusterSelect.value = globalValue
+    return
+  }
   // URL preference is UI-only: select it ONLY if it is a real UUID present here.
   var want = (typeof preferredId === 'string' && UUID_RE.test(preferredId)) ? preferredId : null
   var hasWant = false
@@ -1603,7 +1622,7 @@ function updateBillboardComposer() {
   }
 
   _bbClusters = buildClusterOptions(_unlockedVault, _portalRelations)
-  bbClusterField.style.display = 'block'
+  bbClusterField.style.display = 'none'
   bbRenderClusterSelect(clusterFromHash())
 
   if (_bbClusters.length === 0) {
@@ -1663,7 +1682,7 @@ function bbSoftRefresh() {
     .then(function() {
       // Rebuild Clusters + metadata from the (refreshed) Passport state.
       _bbClusters = buildClusterOptions(_unlockedVault, _portalRelations)
-      bbClusterField.style.display = 'block'
+      bbClusterField.style.display = 'none'
       bbRenderClusterSelect(selectedId)
 
       if (_bbClusters.length === 0) {
@@ -1732,6 +1751,145 @@ var servicePanels = {}
 SERVICES.forEach(function(name) {
   servicePanels[name] = document.getElementById('panel-' + name)
 })
+
+// ═════════════════════════════════════════════════════════════════════════
+// SHARED SCOPE — one selector above every service tab
+//
+// The Passport's DID is the default. Clusters, Vines and Vignards are only
+// offered when the live relation projection says the DID belongs to them.
+// Tabs remain free to reject a scope they do not serve (Files, Billboard).
+// ═════════════════════════════════════════════════════════════════════════
+
+var portalScopeEl = document.getElementById('portalScope')
+
+function _portalT(key, fallback) {
+  return window.spidT ? spidT(key) : fallback
+}
+
+function _portalScopeKey(scope) {
+  return scope && scope.type && scope.id ? scope.type + '|' + scope.id : ''
+}
+
+function _portalShortDid(did) {
+  return did && did.length > 24 ? did.slice(0, 16) + '…' + did.slice(-6) : (did || '')
+}
+
+function portalBuildScopes() {
+  if (!_unlockedVault) return []
+  var out = []
+  var seen = {}
+  function add(type, id, label) {
+    var key = type + '|' + id
+    if (!id || seen[key]) return
+    seen[key] = true
+    out.push({ type: type, id: id, label: label })
+  }
+
+  var did = _holderDid()
+  if (did) {
+    add('did', did, _portalT('scope.did', 'DID · Personnel'))
+  }
+
+  buildClusterOptions(_unlockedVault, _portalRelations).forEach(function (c) {
+    if (!c || !c.cluster_id || c.local_only) return
+    add('cluster', c.cluster_id, c.label || c.name || c.cluster_id)
+  })
+
+  ;((_portalRelations && _portalRelations.vines) || []).forEach(function (v) {
+    if (!v || !v.id) return
+    if (v.status && v.status !== 'approved' && v.status !== 'admin') return
+    add('vine', v.id, _portalT('scope.vine', 'Vine · ') + (v.name || v.id))
+  })
+  ;((_portalRelations && _portalRelations.vignards) || []).forEach(function (g) {
+    if (!g || !g.id) return
+    if (g.status && g.status !== 'approved' && g.status !== 'admin') return
+    add('vignard', g.id, _portalT('scope.vignard', 'Vignard · ') + (g.name || g.id))
+  })
+  return out
+}
+
+function portalCurrentScope() {
+  var raw = portalScopeEl && portalScopeEl.value
+  if (!raw) {
+    var did = _holderDid()
+    return did ? { type: 'did', id: did } : null
+  }
+  var idx = raw.indexOf('|')
+  if (idx < 0) return null
+  var type = raw.slice(0, idx)
+  var id = raw.slice(idx + 1)
+  return type && id ? { type: type, id: id } : null
+}
+
+function portalScopeLabel(scope) {
+  if (!scope) return ''
+  if (portalScopeEl) {
+    for (var i = 0; i < portalScopeEl.options.length; i++) {
+      if (portalScopeEl.options[i].value === _portalScopeKey(scope)) {
+        return portalScopeEl.options[i].textContent
+      }
+    }
+  }
+  if (scope.type === 'did') return _portalT('scope.did', 'DID · Personnel')
+  return scope.type + ' · ' + scope.id
+}
+
+function portalScopeInit() {
+  if (!portalScopeEl) return
+  if (!_unlockedVault) {
+    portalScopeEl.disabled = true
+    portalScopeEl.innerHTML = ''
+    var locked = document.createElement('option')
+    locked.value = ''
+    locked.disabled = true
+    locked.selected = true
+    locked.textContent = _portalT('app.scope_locked', 'Ouvre ton Passport')
+    portalScopeEl.appendChild(locked)
+    return
+  }
+  var previous = portalScopeEl.value
+  var previousScope = portalCurrentScope()
+  var scopes = portalBuildScopes()
+  portalScopeEl.innerHTML = ''
+  scopes.forEach(function (s) {
+    var o = document.createElement('option')
+    o.value = _portalScopeKey(s)
+    o.textContent = s.label
+    portalScopeEl.appendChild(o)
+  })
+  if (!scopes.length) {
+    portalScopeEl.disabled = true
+    return
+  }
+  portalScopeEl.disabled = false
+  var wanted = previous || _portalScopeKey(previousScope)
+  var found = scopes.some(function (s) { return _portalScopeKey(s) === wanted })
+  if (!found) wanted = ''
+  if (!wanted) {
+    var did = _holderDid()
+    wanted = did ? ('did|' + did) : _portalScopeKey({ type: scopes[0].type, id: scopes[0].id })
+  }
+  var before = portalScopeEl.value
+  portalScopeEl.value = wanted
+  if (before && before !== wanted) portalScopeChanged()
+}
+
+function portalScopeChanged() {
+  _assistFileBinding = null
+  assistRenderFileBinding()
+  _assistPending = null
+  _assistDraft = ''
+  _assistPlanScope = null
+  if (assistPlanBox) assistPlanBox.style.display = 'none'
+  calendarReset()
+  if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
+  if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
+  if (servicePanels.billboard && !servicePanels.billboard.hasAttribute('hidden')) updateBillboardComposer()
+  if (servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) relInit()
+}
+
+if (portalScopeEl) portalScopeEl.addEventListener('change', portalScopeChanged)
+portalScopeInit()
 
 function normalizeService(value) {
   return SERVICES.indexOf(value) !== -1 ? value : DEFAULT_SERVICE
@@ -2061,10 +2219,11 @@ function _assistHost() {
   return SPID_SWITCH_HOST
 }
 function _assistScope() {
-  // Same scope as the access discovery (confirmed by the Switchboard).
+  // One shared scope above the tabs. The Switchboard still verifies the
+  // relation and permissions for that exact scope.
+  var shared = portalCurrentScope()
+  if (shared) return shared
   if (_accessRights && _accessRights.scope) return _accessRights.scope
-  // Fallbacks are only for a Passport whose credential does not carry a
-  // scope (legacy/owned only); the Switchboard still verifies the relation.
   var scoped = accessScopeFor(_assistCredential())
   if (scoped) return scoped
   var did = _holderDid()
@@ -2604,7 +2763,7 @@ function assistSubmit(text) {
   if (!_assistAutoBindCurrentFile(text)) return
   var target = _assistFileBinding
     ? { scope: _assistFileBinding.scope, host: SPID_SWITCH_HOST }
-    : (_assistTargetForText(text) || _assistSelectedTarget())
+    : { scope: _assistScope(), host: SPID_SWITCH_HOST }
   var scope = target ? target.scope : _assistScope()
   var host = target ? target.host : null
   _assistPlanScope = scope
@@ -2852,6 +3011,7 @@ var calListEl   = document.getElementById('calList')
 var calPrevBtn  = document.getElementById('calPrev')
 var calNextBtn  = document.getElementById('calNext')
 var calTodayBtn = document.getElementById('calToday')
+var calScopeLabel = document.getElementById('calScopeLabel')
 
 var CAL_PALETTE = ['#e8c877', '#6da3e0', '#b18ad6', '#6fbf73', '#d9a441', '#c94961', '#8d939c']
 var _calAnchor  = null   // Date pinned to the 1st of the displayed month
@@ -2865,32 +3025,21 @@ function _holderDid() {
 }
 
 function _calScope() {
-  var did = _holderDid()
-  return did ? { type: 'did', id: did } : null
+  return portalCurrentScope()
 }
 
-/** Every scope the DID holds a key to: its own (did) + each Cluster. */
+/** The calendar follows the one shared scope; it never merges scopes. */
 function _calScopes() {
-  var out = []
-  var did = _holderDid()
-  if (did) {
-    out.push({ type: 'did', id: did, host: SPID_SWITCH_HOST, label: 'Personnel', color: CAL_PALETTE[0] })
-  }
-  var clusters = buildClusterOptions(_unlockedVault, _portalRelations)
-  for (var i = 0; i < clusters.length; i++) {
-    var c = clusters[i]
-    // A Cluster without a Switchboard scope stays in the Passport, not in a
-    // Switchboard calendar call.
-    if (c.local_only) continue
-    // All scopes use the network-wide Switchboard.
-    var host = SPID_SWITCH_HOST
-    out.push({
-      type: 'cluster', id: c.cluster_id, host: host,
-      label: c.name || c.cluster_id,
-      color: CAL_PALETTE[1 + (Math.abs(_calHash(c.cluster_id)) % (CAL_PALETTE.length - 1))],
-    })
-  }
-  return out
+  var sc = portalCurrentScope()
+  if (!sc) return []
+  var key = sc.type + '|' + sc.id
+  return [{
+    type: sc.type,
+    id: sc.id,
+    host: SPID_SWITCH_HOST,
+    label: portalScopeLabel(sc),
+    color: CAL_PALETTE[Math.abs(_calHash(key)) % CAL_PALETTE.length],
+  }]
 }
 
 function _calHash(s) {
@@ -3000,6 +3149,12 @@ function calendarRetry() {
 
 function calendarRender() {
   if (!calMonthEl) return
+  if (calScopeLabel) {
+    var scopeLabel = portalScopeLabel(portalCurrentScope())
+    calScopeLabel.textContent = scopeLabel
+      ? _portalT('calendar.scope', 'Portée :') + ' ' + scopeLabel
+      : ''
+  }
   var y = _calAnchor.getFullYear(), m = _calAnchor.getMonth()
   var label = _calAnchor.toLocaleDateString(_calLocale(), { month: 'long', year: 'numeric' })
   calMonthEl.textContent = label.charAt(0).toUpperCase() + label.slice(1)
@@ -3138,7 +3293,6 @@ if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) ca
 // ═════════════════════════════════════════════════════════════════════════
 
 var filesStatusEl = document.getElementById('filesStatus')
-var filesScopeEl = document.getElementById('filesScope')
 var filesScopeLabel = document.getElementById('filesScopeLabel')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
 var filesPublishedNote = document.getElementById('filesPublishedNote')
@@ -3174,9 +3328,8 @@ function filesSetStatus(text, loading) {
 }
 
 function filesCurrentScope() {
-  return filesScopeEl && filesScopeEl.value
-    ? { type: 'cluster', id: filesScopeEl.value }
-    : null
+  var sc = portalCurrentScope()
+  return sc && sc.type === 'cluster' ? sc : null
 }
 
 function filesSelectedOption() {
@@ -3224,18 +3377,20 @@ function filesClearState() {
 }
 
 function filesNoScope(text) {
-  if (!filesScopeEl) return
-  filesScopeEl.innerHTML = ''
-  var o = document.createElement('option')
-  o.value = ''
-  o.disabled = true
-  o.selected = true
-  o.textContent = text
-  filesScopeEl.appendChild(o)
   _filesPublished = []
   _filesPublishedScope = ''
   _filesLoadContentFromSnapshot = false
   if (filesPublishedNote) filesPublishedNote.textContent = ''
+  if (filesScopeLabel) filesScopeLabel.textContent = ''
+  if (filesVaultFileEl) {
+    filesVaultFileEl.innerHTML = ''
+    var empty = document.createElement('option')
+    empty.value = ''
+    empty.disabled = true
+    empty.selected = true
+    empty.textContent = text
+    filesVaultFileEl.appendChild(empty)
+  }
   filesClearState()
   if (filesContentEl) filesContentEl.value = ''
   filesSetStatus(text)
@@ -3261,8 +3416,7 @@ function filesRenderVaultFiles() {
   if (!filesVaultFileEl) return
   var keep = filesVaultFileEl.value
   if (filesScopeLabel) {
-    var selected = filesScopeEl && filesScopeEl.options[filesScopeEl.selectedIndex]
-    var scopeName = selected ? selected.textContent : ''
+    var scopeName = portalScopeLabel(portalCurrentScope())
     filesScopeLabel.textContent = scopeName
       ? filesT('files.scope_files', 'Fichiers disponibles — cible :') + ' ' + scopeName
       : ''
@@ -3277,8 +3431,9 @@ function filesRenderVaultFiles() {
     if (/^data:image\//i.test(f.content)) return false
     return true
   })
-  var published = (_filesPublishedScope && filesScopeEl &&
-    filesScopeEl.value === _filesPublishedScope ? _filesPublished : [])
+  var currentFilesScope = filesCurrentScope()
+  var published = (_filesPublishedScope && currentFilesScope &&
+    currentFilesScope.id === _filesPublishedScope ? _filesPublished : [])
     .filter(function (p) { return p && p.file_id })
 
   if (!files.length && !published.length) {
@@ -3326,35 +3481,19 @@ function filesRenderVaultFiles() {
   }
 }
 
-function filesLoadScopes(relations) {
-  if (!filesScopeEl) return
+function filesLoadScopes() {
   _filesPublished = []
   _filesPublishedScope = ''
   if (filesPublishedNote) filesPublishedNote.textContent = ''
-  var keep = filesScopeEl.value
-  var serverIds = {}
-  ;((relations && relations.clusters) || []).forEach(function (c) {
-    if (c && c.id && (c.cluster_status || 'active') === 'active') serverIds[c.id] = true
-  })
-  var clusters = buildClusterOptions(_unlockedVault, relations).filter(function (c) {
-    return !c.local_only && !!serverIds[c.cluster_id]
-  })
-  filesScopeEl.innerHTML = ''
-  if (!clusters.length) {
-    filesNoScope(filesT('files.no_scope', 'Aucun Cluster disponible.'))
+  var scope = filesCurrentScope()
+  if (!scope) {
+    filesNoScope(filesT('files.select_global_cluster',
+      'Sélectionne un cluster dans la portée globale.'))
     return
   }
-  clusters.forEach(function (c) {
-    var o = document.createElement('option')
-    o.value = c.cluster_id
-    o.textContent = c.label || c.name || c.cluster_id
-    filesScopeEl.appendChild(o)
-  })
-  if (keep) filesScopeEl.value = keep
-  if (!filesScopeEl.value) filesScopeEl.value = clusters[0].cluster_id
   filesRenderVaultFiles()
   filesLoad()
-  filesListPublished(filesCurrentScope())
+  filesListPublished(scope)
 }
 
 function filesListPublished(scope) {
@@ -3417,7 +3556,7 @@ function filesInit() {
       return
     }
     _filesLoaded = true
-    filesLoadScopes(r.relations)
+    filesLoadScopes()
   }).catch(function (e) {
     filesNoScope(filesT('files.unavailable', 'Indisponible.'))
     filesSetStatus(filesT('files.error', 'Erreur : ') + (e && e.message ? e.message : e))
@@ -3451,10 +3590,11 @@ function filesRender(state) {
   if (filesPromptSaveBtn) {
     filesPromptSaveBtn.style.display = canEditPrompt ? 'inline-flex' : 'none'
   }
+  var bindingScope = filesCurrentScope()
   if (_assistFileBinding && manifest &&
       _assistFileBinding.fileId === manifest.file_id &&
-      _assistFileBinding.scope && filesScopeEl &&
-      _assistFileBinding.scope.id === filesScopeEl.value) {
+      _assistFileBinding.scope && bindingScope &&
+      _assistFileBinding.scope.id === bindingScope.id) {
     _assistFileBinding.version = manifest.version || 0
     _assistFileBinding.prompt = manifest.assist_prompt || ''
     _assistFileBinding.name = manifest.name || _assistFileBinding.name
@@ -3766,7 +3906,6 @@ function filesOnScopeChange() {
 }
 
 if (filesVaultFileEl) filesVaultFileEl.addEventListener('change', filesLoadVaultFile)
-if (filesScopeEl) filesScopeEl.addEventListener('change', filesOnScopeChange)
 if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -4254,6 +4393,7 @@ function refreshPortalRelations() {
   }).then(function (r) {
     _portalRelationsRefreshing = false
     if (!r.ok) return r
+    portalScopeInit()
     var C = _relContract()
     if (C && servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) {
       _relLoaded = true
@@ -4404,7 +4544,18 @@ function relRender(d, C) {
     o.dataset.role = r.role || ''
     relScope.appendChild(o)
   })
-  if (previousScope) relScope.value = previousScope
+  var globalScope = portalCurrentScope()
+  var globalKey = globalScope && globalScope.type !== 'did'
+    ? globalScope.type + '|' + globalScope.id : ''
+  if (globalKey) {
+    var globalFound = false
+    for (var gi = 0; gi < relScope.options.length; gi++) {
+      if (relScope.options[gi].value === globalKey) { globalFound = true; break }
+    }
+    if (globalFound) relScope.value = globalKey
+  } else if (!globalScope && previousScope) {
+    relScope.value = previousScope
+  }
   if (!scopes.length) {
     placeholder.textContent = 'Aucune communauté disponible'
     placeholder.selected = true

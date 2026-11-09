@@ -136,6 +136,19 @@ html, body {
   background: rgba(201, 169, 97, 0.08);
 }
 
+.portal-scope-bar {
+  margin: 14px 0 0;
+}
+.portal-scope-bar label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.portal-scope-bar .bb-select { width: 100%; }
+
 .tab-panel { padding-top: 18px; outline: none; }
 .tab-panel:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
@@ -484,6 +497,17 @@ html.embed .panel { margin-bottom: 0; }
   font-family: 'Georgia', serif;
   resize: vertical;
 }
+.bb-textarea.files-code-area {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre;
+}
+.bb-textarea.files-prompt-area {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .bb-textarea:focus { border-color: var(--gold); }
 .bb-confirm { margin-top: 8px; }
 .bb-confirm-row { display: flex; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
