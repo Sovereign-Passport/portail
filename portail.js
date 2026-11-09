@@ -1847,7 +1847,8 @@ function portalScopeInit() {
     portalScopeEl.appendChild(locked)
     return
   }
-  var previous = portalScopeEl.value
+  var before = portalScopeEl.value
+  var previous = before
   var previousScope = portalCurrentScope()
   var scopes = portalBuildScopes()
   portalScopeEl.innerHTML = ''
@@ -1869,7 +1870,6 @@ function portalScopeInit() {
     var did = _holderDid()
     wanted = did ? ('did|' + did) : _portalScopeKey({ type: scopes[0].type, id: scopes[0].id })
   }
-  var before = portalScopeEl.value
   portalScopeEl.value = wanted
   if (before && before !== wanted) portalScopeChanged()
 }
