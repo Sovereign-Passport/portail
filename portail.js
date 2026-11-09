@@ -1884,7 +1884,10 @@ function portalScopeChanged() {
   calendarReset()
   if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) calendarInit()
   if (servicePanels.files && !servicePanels.files.hasAttribute('hidden')) filesInit()
+  _msLoaded = false
+  if (servicePanels.messages && !servicePanels.messages.hasAttribute('hidden')) msInit()
   if (servicePanels.billboard && !servicePanels.billboard.hasAttribute('hidden')) updateBillboardComposer()
+  _relResetInvite()
   if (servicePanels.relations && !servicePanels.relations.hasAttribute('hidden')) relInit()
 }
 
@@ -2730,7 +2733,9 @@ function assistBillboardPostOp(a) {
 }
 
 function _assistHasFileIntent(text) {
-  return /(fichier|\bfile\b|budget|csv|\bMAN-|mandalin)/i.test(text || '')
+  // Only an explicit file request auto-binds the Files selection. A Cluster
+  // named Mandalin or the word "budget" in a calendar request must not.
+  return /(fichier|\bfile\b|csv|\bMAN-)/i.test(text || '')
 }
 
 function _assistAutoBindCurrentFile(text) {
@@ -3927,6 +3932,26 @@ var _msLoaded = false
 
 function _msScope() { var d = _holderDid(); return d ? { type: 'did', id: d } : null }
 
+function _msMessageScope(m) {
+  if (!m) return null
+  try {
+    var p = JSON.parse(m.payload || '{}')
+    if (p && p.scope && p.scope.type && p.scope.id) {
+      return { type: p.scope.type, id: p.scope.id }
+    }
+  } catch (e) {}
+  if (m.route_type && m.route_id) return { type: m.route_type, id: m.route_id }
+  return null
+}
+
+function _msMatchesScope(m) {
+  var scope = portalCurrentScope()
+  if (!scope) return true
+  var ms = _msMessageScope(m)
+  if (!ms) return scope.type === 'did'
+  return ms.type === scope.type && ms.id === scope.id
+}
+
 function msSetStatus(text, loading) {
   if (!msStatus) return
   if (!text) { msStatus.style.display = 'none'; msStatus.textContent = ''; msStatus.classList.remove('loading'); return }
@@ -3972,7 +3997,12 @@ function msLoadContacts() {
           groups.push({ type: 'cluster', id: c.cluster_id, name: c.name || c.cluster_id, members: [], local_only: !!c.local_only })
         })
       }
-      var list = (d && d.contacts) || []
+      var scope = portalCurrentScope()
+      if (scope) {
+        groups = scope.type === 'did'
+          ? []
+          : groups.filter(function (g) { return g && g.type === scope.type && g.id === scope.id })
+      }
       msToSel.innerHTML = ''
       var summary = document.getElementById('msPickerSummary')
       if (summary) {
@@ -3981,9 +4011,6 @@ function msLoadContacts() {
           : 'Aucune communauté disponible'
       }
 
-      if (!groups.length && list.length) {
-        groups = [{ type: 'contacts', id: 'contacts', name: 'Contacts', members: list }]
-      }
       groups.forEach(function (g) {
         var section = document.createElement('div')
         section.className = 'ms-picker-section'
@@ -4065,7 +4092,7 @@ function msLoad() {
         return
       }
       _msLoaded = true
-      msRender(d.messages)
+      msRender(d.messages.filter(_msMatchesScope))
     })})
     .catch(function (e) { msSetStatus(''); msNote('Erreur : ' + (e && e.message ? e.message : e)) })
 }
@@ -4122,7 +4149,9 @@ function msSend() {
   var chain = Promise.resolve()
   recips.forEach(function (to) {
     chain = chain.then(function () {
-      return _selfSignedBody('messages', 'send', { to_did: to, body: body }, _msScope(), SPID_SWITCH_HOST)
+      return _selfSignedBody('messages', 'send', {
+        to_did: to, body: body, scope: portalCurrentScope(),
+      }, _msScope(), SPID_SWITCH_HOST)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
           results.push((resp.ok && d && d.ok) ? '✓' : '✗ ' + ((d && (d.error || d.message)) || resp.status))
@@ -4864,6 +4893,15 @@ function _relOpenQr(svg, link) {
   text.textContent = link
   card.appendChild(close); card.appendChild(box); card.appendChild(text)
   ov.appendChild(card); document.body.appendChild(ov)
+}
+
+function _relResetInvite() {
+  var wrap = document.getElementById('relLinkWrap')
+  if (wrap) wrap.style.display = 'none'
+  var input = document.getElementById('relLink')
+  if (input) input.value = ''
+  var qr = document.getElementById('relQr')
+  if (qr) qr.innerHTML = ''
 }
 
 function _relShowInvite(link) {
