@@ -2457,6 +2457,118 @@ function assistChecklistUpdate(a, scope, host) {
   })
 }
 
+
+function _assistKey(value) {
+  return String(value || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function _assistMembersForScope(scope, host) {
+  if (!scope || !_unlockedVault || scope.type === 'did') return Promise.resolve([])
+  return _relSelfCall('members', {}, scope, host || SPID_SWITCH_HOST)
+    .then(function (resp) { return resp.text().then(function (t) {
+      var d = null
+      try { d = JSON.parse(t) } catch (e) { d = null }
+      return (d && Array.isArray(d.members)) ? d.members : []
+    })})
+    .catch(function () { return [] })
+}
+
+function _assistResolveMember(value, members) {
+  if (value && typeof value === 'object') {
+    value = value.did || value.handle || value.name || ''
+  }
+  if (typeof value !== 'string') return null
+  var raw = value.trim()
+  if (!raw) return null
+  if (/^did:/.test(raw)) {
+    if (!members.length) return raw
+    var exact = members.find(function (m) { return m && m.did === raw })
+    return exact ? exact.did : null
+  }
+  var key = _assistKey(raw)
+  if (!key) return null
+  for (var i = 0; i < members.length; i++) {
+    var m = members[i]
+    var mkey = _assistKey(m && (m.handle || m.did))
+    if (mkey && (mkey === key || mkey.indexOf(key) === 0 || key.indexOf(mkey) === 0)) {
+      return m.did
+    }
+  }
+  return null
+}
+
+function _assistResolvePeople(values, members) {
+  var arr = Array.isArray(values) ? values : (values == null ? [] : [values])
+  var out = []
+  var seen = {}
+  arr.forEach(function (value) {
+    var did = _assistResolveMember(value, members)
+    if (did && !seen[did]) { seen[did] = true; out.push(did) }
+  })
+  return out
+}
+
+function assistCalendarCreate(a, scope, host) {
+  var data = Object.assign({}, a.data || {})
+  return _assistMembersForScope(scope, host).then(function (members) {
+    var raw = Array.isArray(data.participants)
+      ? data.participants
+      : (data.participants == null ? [] : [data.participants])
+    if (raw.length) {
+      var dids = _assistResolvePeople(raw, members)
+      if (dids.length !== raw.length) throw new Error('PARTICIPANT_NOT_MEMBER')
+      data.participants = dids.map(function (did) { return { did: did } })
+    }
+    return _assistSignedBody('calendar', 'create', data, scope, host)
+      .then(function (resp) { return resp.text().then(function (t) {
+        var d = null
+        try { d = JSON.parse(t) } catch (e) { d = null }
+        if (!resp.ok || !d || !d.ok) {
+          throw new Error((d && (d.error || d.message || d.detail)) || ('HTTP ' + resp.status))
+        }
+        return d
+      })})
+  })
+}
+
+function assistMessagesSend(a, scope, host) {
+  var data = Object.assign({}, a.data || {})
+  var raw = data.recipients
+  if (!Array.isArray(raw)) {
+    raw = raw ? [raw] : [data.to_did || data.to || data.recipient].filter(Boolean)
+  }
+  var body = String(data.content || data.message || data.body || '').trim()
+  if (!body) return Promise.reject(new Error('BODY_REQUIRED'))
+  return _assistMembersForScope(scope, host).then(function (members) {
+    var tos = _assistResolvePeople(raw, members)
+    if (!tos.length) throw new Error('RECIPIENT_NOT_FOUND')
+    var chain = Promise.resolve()
+    var ok = 0
+    var errors = []
+    tos.forEach(function (to) {
+      chain = chain.then(function () {
+        var payload = { to_did: to, body: body, scope: scope }
+        if (data.remind_at) payload.remind_at = data.remind_at
+        return _assistSignedBody('messages', 'send', payload, _msScope(), host)
+          .then(function (resp) { return resp.text().then(function (t) {
+            var d = null
+            try { d = JSON.parse(t) } catch (e) { d = null }
+            if (!resp.ok || !d || !d.ok) {
+              throw new Error((d && (d.error || d.message)) || ('HTTP ' + resp.status))
+            }
+            ok++
+          })})
+          .catch(function (e) { errors.push(e.message || String(e)) })
+      })
+    })
+    return chain.then(function () {
+      return { ok: ok, total: tos.length, errors: errors }
+    })
+  })
+}
+
 function assistConfirm(plan) {
   if (!_assistAccessReady) {
     assistLine('Droits non confirmés pour Assist — action non exécutée.')
@@ -2475,6 +2587,7 @@ function assistConfirm(plan) {
   var touchedChecklist = false
   var touchedFiles = false
   var touchedFileId = null
+  var touchedMessages = false
   actions.forEach(function (a) {
     chain = chain.then(function () {
       if (a.service === 'files') {
@@ -2495,6 +2608,21 @@ function assistConfirm(plan) {
         return assistBillboardPostOp(a)
           .then(function () { results.push('billboard/action (' + ((a.data || {}).op || '?') + ') → OK') })
           .catch(function (e) { results.push('billboard/action → erreur (' + e.message + ')') })
+      }
+      if (a.service === 'calendar' && a.action === 'create') {
+        touchedCalendar = true
+        return assistCalendarCreate(a, sc, planHost)
+          .then(function () { results.push('calendar/create → OK') })
+          .catch(function (e) { results.push('calendar/create → erreur (' + e.message + ')') })
+      }
+      if (a.service === 'messages' && a.action === 'send') {
+        touchedMessages = true
+        return assistMessagesSend(a, sc, planHost)
+          .then(function (r) {
+            results.push('messages/send → ' + r.ok + '/' + r.total +
+              (r.errors.length ? ' · ' + r.errors.join(' ; ') : ''))
+          })
+          .catch(function (e) { results.push('messages/send → erreur (' + e.message + ')') })
       }
       if (a.service === 'calendar' && a.action === 'update') {
         // Move / edit a calendar entry — resolved + signed here (no bypass).
@@ -2536,6 +2664,10 @@ function assistConfirm(plan) {
     if (touchedFiles) {
       if (touchedFileId && filesCurrentFileId() === touchedFileId) filesLoad()
       if (filesCurrentScope()) filesListPublished(filesCurrentScope())
+    }
+    if (touchedMessages) {
+      _msLoaded = false
+      if (servicePanels.messages && !servicePanels.messages.hasAttribute('hidden')) msInit()
     }
   })
 }
