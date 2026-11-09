@@ -3306,6 +3306,8 @@ if (servicePanels.calendar && !servicePanels.calendar.hasAttribute('hidden')) ca
 var filesStatusEl = document.getElementById('filesStatus')
 var filesScopeLabel = document.getElementById('filesScopeLabel')
 var filesVaultFileEl = document.getElementById('filesVaultFile')
+var filesUnassignedWrap = document.getElementById('filesUnassignedWrap')
+var filesShowUnassignedEl = document.getElementById('filesShowUnassigned')
 var filesPublishedNote = document.getElementById('filesPublishedNote')
 var filesSnapshotField = document.getElementById('filesSnapshotField')
 var filesSnapshotEl = document.getElementById('filesSnapshot')
@@ -3393,6 +3395,7 @@ function filesNoScope(text) {
   _filesLoadContentFromSnapshot = false
   if (filesPublishedNote) filesPublishedNote.textContent = ''
   if (filesScopeLabel) filesScopeLabel.textContent = ''
+  if (filesUnassignedWrap) filesUnassignedWrap.style.display = 'none'
   if (filesVaultFileEl) {
     filesVaultFileEl.innerHTML = ''
     var empty = document.createElement('option')
@@ -3405,6 +3408,20 @@ function filesNoScope(text) {
   filesClearState()
   if (filesContentEl) filesContentEl.value = ''
   filesSetStatus(text)
+}
+
+function _fileInScope(f, scope) {
+  if (!f || !scope) return false
+  var s = f.share && f.share.scope
+  if (s) return s.type === scope.type && s.id === scope.id
+  if (f.cluster_id) return f.cluster_id === scope.id
+  return false
+}
+
+function _fileUnassigned(f) {
+  if (!f) return false
+  var s = f.share && f.share.scope
+  return !s && !f.cluster_id
 }
 
 function _fileScopeLabel(f) {
@@ -3443,12 +3460,21 @@ function filesRenderVaultFiles() {
     return true
   })
   var currentFilesScope = filesCurrentScope()
+  var scopedFiles = files.filter(function (f) {
+    return _fileInScope(f, currentFilesScope)
+  })
+  var unassignedFiles = files.filter(_fileUnassigned)
+  var showUnassigned = !!(filesShowUnassignedEl && filesShowUnassignedEl.checked)
+  if (filesUnassignedWrap) {
+    filesUnassignedWrap.style.display = (currentFilesScope && unassignedFiles.length)
+      ? 'flex' : 'none'
+  }
   var published = (_filesPublishedScope && currentFilesScope &&
     currentFilesScope.id === _filesPublishedScope ? _filesPublished : [])
     .filter(function (p) { return p && p.file_id })
 
-  if (!files.length && !published.length) {
-    empty.textContent = filesT('files.no_file', 'Aucun fichier de référence dans le Passport.')
+  if (!scopedFiles.length && !(showUnassigned && unassignedFiles.length) && !published.length) {
+    empty.textContent = filesT('files.no_file', 'Aucun fichier pour ce scope.')
     filesVaultFileEl.value = ''
     if (filesContentEl) filesContentEl.value = ''
     return
@@ -3470,10 +3496,10 @@ function filesRenderVaultFiles() {
     })
     filesVaultFileEl.appendChild(publishedGroup)
   }
-  if (files.length) {
+  if (scopedFiles.length) {
     var localGroup = document.createElement('optgroup')
     localGroup.label = filesT('files.passport_group', 'Fichiers du Passport')
-    files.forEach(function (f) {
+    scopedFiles.forEach(function (f) {
       var name = f.name || f.path || 'file'
       var o = document.createElement('option')
       o.value = name
@@ -3484,6 +3510,21 @@ function filesRenderVaultFiles() {
       localGroup.appendChild(o)
     })
     filesVaultFileEl.appendChild(localGroup)
+  }
+  if (showUnassigned && unassignedFiles.length) {
+    var unassignedGroup = document.createElement('optgroup')
+    unassignedGroup.label = filesT('files.unassigned_group', 'Fichiers non assignés')
+    unassignedFiles.forEach(function (f) {
+      var name = f.name || f.path || 'file'
+      var o = document.createElement('option')
+      o.value = name
+      o.dataset.kind = 'local'
+      o.dataset.fileId = _fileIdFor(f)
+      o.dataset.name = name
+      o.textContent = name + ' · ' + filesT('files.unassigned', 'non assigné')
+      unassignedGroup.appendChild(o)
+    })
+    filesVaultFileEl.appendChild(unassignedGroup)
   }
   if (keep) filesVaultFileEl.value = keep
   if (!filesVaultFileEl.value) {
@@ -3496,6 +3537,7 @@ function filesLoadScopes() {
   _filesPublished = []
   _filesPublishedScope = ''
   if (filesPublishedNote) filesPublishedNote.textContent = ''
+  if (filesShowUnassignedEl) filesShowUnassignedEl.checked = false
   var scope = filesCurrentScope()
   if (!scope) {
     filesNoScope(filesT('files.select_global_cluster',

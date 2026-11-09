@@ -503,6 +503,16 @@ html.embed .panel { margin-bottom: 0; }
   line-height: 1.35;
   white-space: pre;
 }
+.files-unassigned-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 2px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.files-unassigned-toggle input { accent-color: var(--gold); }
+
 .bb-textarea.files-prompt-area {
   font-size: 12px;
   line-height: 1.4;
