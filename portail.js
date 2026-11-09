@@ -2506,7 +2506,7 @@ function assistConfirm(plan) {
       // Calendar entries belong to the DID itself (personal scope 'did').
       var isCal = (a.service === 'calendar')
       if (isCal) touchedCalendar = true
-      var asc   = isCal ? _calScope() : sc
+      var asc   = sc
       return _assistSignedBody(a.service, a.action, a.data || {}, asc, SPID_SWITCH_HOST)
         .then(function (resp) { return resp.text().then(function (t) {
           var d = null; try { d = JSON.parse(t) } catch (e) { d = null }
@@ -2774,7 +2774,7 @@ function assistSubmit(text) {
   if (!_assistAutoBindCurrentFile(text)) return
   var target = _assistFileBinding
     ? { scope: _assistFileBinding.scope, host: SPID_SWITCH_HOST }
-    : { scope: _assistScope(), host: SPID_SWITCH_HOST }
+    : (_assistTargetForText(text) || { scope: _assistScope(), host: SPID_SWITCH_HOST })
   var scope = target ? target.scope : _assistScope()
   var host = target ? target.host : null
   _assistPlanScope = scope
