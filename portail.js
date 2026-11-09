@@ -2134,6 +2134,7 @@ function filesUseAssist() {
     version: m.version || 0,
     prompt: m.assist_prompt || '',
     content: filesContentEl ? filesContentEl.value : '',
+    explicit: true,
   }
   assistRenderFileBinding()
   activateService('assist')
@@ -2757,6 +2758,7 @@ function _assistAutoBindCurrentFile(text) {
     version: m.version || 0,
     prompt: m.assist_prompt || '',
     content: filesContentEl ? filesContentEl.value : '',
+    explicit: false,
   }
   assistRenderFileBinding()
   assistSetReady(true)
@@ -2765,6 +2767,10 @@ function _assistAutoBindCurrentFile(text) {
 
 function assistSubmit(text) {
   if (!text || _assistBusy || !_assistAccessReady) return
+  if (_assistFileBinding && !_assistFileBinding.explicit && !_assistHasFileIntent(text)) {
+    _assistFileBinding = null
+    assistRenderFileBinding()
+  }
   if (!_assistAutoBindCurrentFile(text)) return
   var target = _assistFileBinding
     ? { scope: _assistFileBinding.scope, host: SPID_SWITCH_HOST }
