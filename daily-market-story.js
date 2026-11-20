@@ -203,8 +203,8 @@
       connected: true,
       coverage: { measured: 12, total: 12 },
       expression: {
-        code: 'D', word: 'Diverging', polarity: 'neutral',
-        score: -4.2, coverage: 12, vocabulary: 'spid-az-v0-provisional'
+        code: 'X', word: 'Crosscurrents', polarity: 'neutral',
+        score: -4.2, coverage: 12, vocabulary: 'spid-az-v1'
       },
       axes: axes,
       regions: {

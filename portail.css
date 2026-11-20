@@ -878,7 +878,7 @@ html.dms-open { overflow: hidden; }
   color: var(--text-dim);
   font-family: 'Courier New', monospace;
 }
-.dms-word { font-size: 21px; color: var(--text); }
+.dms-word { font-size: 21px; line-height: 1.15; color: var(--text); }
 .dms-hero-line { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 5px; font-size: 10.5px; }
 .dms-polarity { text-transform: uppercase; letter-spacing: 0.1em; font-size: 9.5px; }
 .dms-polarity.is-positive { color: var(--green); }
