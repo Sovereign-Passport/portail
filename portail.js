@@ -2005,7 +2005,8 @@ try {
 var _navEntry = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null
 var _isReload = (_navEntry && _navEntry.type === 'reload') ||
   (performance.navigation && performance.navigation.type === 1)
-if (_isReload) {
+var _storyDeepLink = /(?:^|[#&])story=1(?:&|$)/.test(location.hash || '')
+if (_isReload && !_storyDeepLink) {
   try { history.replaceState(null, '', location.pathname + location.search) } catch (err) {}
   activateService('assist')
 } else {

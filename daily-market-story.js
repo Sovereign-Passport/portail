@@ -695,7 +695,36 @@
     if (!_overlay) return;
     _overlay.hidden = true;
     document.documentElement.classList.remove('dms-open');
+    clearStoryHash();
     if (_lastFocus && typeof _lastFocus.focus === 'function') _lastFocus.focus();
+  }
+
+  function hashParams() {
+    var h = location.hash || '';
+    if (h.charAt(0) === '#') h = h.slice(1);
+    try {
+      return new URLSearchParams(h);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hashWantsStory() {
+    var params = hashParams();
+    return !!(params && params.get('story') === '1');
+  }
+
+  function clearStoryHash() {
+    var params = hashParams();
+    if (!params || params.get('story') !== '1') return;
+    try {
+      params.delete('story');
+      var next = params.toString();
+      history.replaceState(
+        null, '',
+        location.pathname + location.search + (next ? '#' + next : '')
+      );
+    } catch (e) {}
   }
 
   function onKeydown(e) {
@@ -730,6 +759,11 @@
     // this module was parsed).
     var billboardPanel = document.getElementById('panel-billboard');
     if (billboardPanel && !billboardPanel.hasAttribute('hidden')) prime();
+    // Deep link from the Orbit menu: #service=billboard&story=1
+    if (hashWantsStory()) setTimeout(openModal, 0);
+    window.addEventListener('hashchange', function () {
+      if (hashWantsStory()) openModal();
+    });
     // The catalog language can change while the modal is open.
     var langButtons = document.querySelectorAll('.lang-btn[data-lang]');
     for (var j = 0; j < langButtons.length; j++) {
