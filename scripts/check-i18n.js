@@ -46,6 +46,16 @@ while ((m = callRe.exec(js))) {
   if (!keys.has(m[1])) errors.push(`portail.js: unknown key ${m[1]}`)
 }
 
+const dmsPath = path.join(root, 'daily-market-story.js')
+if (fs.existsSync(dmsPath)) {
+  const dms = fs.readFileSync(dmsPath, 'utf8')
+  const dmsRe = /(?:^|[^A-Za-z0-9_])t\(\s*['"]([^'"]+)['"]/g
+  while ((m = dmsRe.exec(dms))) {
+    if (m[1].endsWith('.')) continue
+    if (!keys.has(m[1])) errors.push(`daily-market-story.js: unknown key ${m[1]}`)
+  }
+}
+
 if (errors.length) {
   console.error(errors.join('\n'))
   process.exit(1)

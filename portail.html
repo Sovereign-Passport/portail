@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Sovereign Passport Portal">
-<link rel="stylesheet" href="portail.css?v=19"
+<link rel="stylesheet" href="portail.css?v=21"
       onload="document.documentElement.classList.add('css-ready')">
 <style>
   html:not(.css-ready) .content { visibility: hidden; }
@@ -66,6 +66,13 @@
         <button class="tab" id="tab-files" role="tab" type="button"
                 aria-controls="panel-files" aria-selected="false" data-service="files" tabindex="-1" data-i18n="files.tab">Fichiers</button>
       </div>
+
+      <!-- Menu-bar entry — opens a dialog, so it is not an ARIA tab. -->
+      <button class="dms-menu-entry" id="tab-market-story" type="button"
+              data-dms-open aria-haspopup="dialog" aria-controls="marketStoryModal">
+        <span data-i18n="dms.tab">Daily Market Story</span>
+        <span class="tab-arrow" aria-hidden="true">▾</span>
+      </button>
 
       <!-- Assist — current Passport detection and access flow (unchanged) -->
       <section class="tab-panel" id="panel-assist" role="tabpanel" aria-labelledby="tab-assist" tabindex="0">
@@ -152,6 +159,17 @@
           <button class="btn btn-ghost" id="bbRefreshBtn" type="button">Refresh</button>
           <button class="btn btn-gold" id="bbNewBtn" type="button" style="display:none;">New post</button>
         </div>
+
+        <!-- Daily Market Story — same public Nugget projection as the menu bar. -->
+        <button class="dms-entry" type="button" data-dms-open
+                aria-haspopup="dialog" aria-controls="marketStoryModal">
+          <span class="dms-entry-icon" aria-hidden="true">📈</span>
+          <span class="dms-entry-text">
+            <span class="dms-entry-title" data-i18n="dms.entry_title">Daily Market Story</span>
+            <span class="dms-entry-sub" data-i18n="dms.entry_sub">Nugget readings · initial testing build</span>
+          </span>
+          <span class="dms-entry-arrow" aria-hidden="true">▾</span>
+        </button>
         <p class="bb-note" id="bbCreateHint" style="display:none;">Open your Passport to publish</p>
 
         <div id="bbStatus" class="bb-status" style="display:none;"></div>
@@ -356,10 +374,11 @@
   </div>
 
 <script type="module" src="relations-client.js?v=3"></script>
-<script src="i18n/catalogs.js?v=26"></script>
+<script src="i18n/catalogs.js?v=28"></script>
 <script src="spid.i18n.js?v=4"></script>
 <script src="vendor/qrcode-generator.js?v=1"></script>
-<script src="portail.js?v=86"></script>
+<script src="portail.js?v=88"></script>
+<script src="daily-market-story.js?v=2"></script>
 <script src="pwa-install.js?v=2"></script>
 </body>
 </html>

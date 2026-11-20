@@ -21,6 +21,8 @@
 // service; the Vine is neither the app origin nor the Switchboard.
 var SPID_PUBLIC_APP_ORIGIN = 'https://sovereign-passport.github.io'
 const SPID_SWITCH_HOST = 'https://sb.sovereign-passport.id'
+// Exposed read-only for independent Portail modules (Daily Market Story).
+window.SPID_SWITCH_HOST = SPID_SWITCH_HOST
 const SPID_INVITE_ANCHOR = SPID_SWITCH_HOST
 var DEFAULT_VINE_DID = 'did:web:mdusl.sovereign-passport.id'
 var PBKDF2_ITER = 600000
@@ -1746,7 +1748,7 @@ updateBillboardComposer()
 var SERVICES = ['assist', 'billboard', 'calendar', 'messages', 'relations', 'files']
 var DEFAULT_SERVICE = 'assist'
 
-var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab'))
+var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab[role="tab"]'))
 var servicePanels = {}
 SERVICES.forEach(function(name) {
   servicePanels[name] = document.getElementById('panel-' + name)
@@ -1916,6 +1918,10 @@ function activateService(name) {
 
   if (target === 'billboard') {
     updateBillboardComposer()
+    // One-shot market gather when the Billboard tab opens (server cooldown).
+    if (window.SPIDDailyMarketStory && typeof window.SPIDDailyMarketStory.prime === 'function') {
+      window.SPIDDailyMarketStory.prime()
+    }
   }
   if (target === 'calendar') {
     calendarInit()
