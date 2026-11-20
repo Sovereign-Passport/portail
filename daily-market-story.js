@@ -183,6 +183,15 @@
     axes[9].score = -41; axes[9].direction = 'down';
     axes[10].score = -30; axes[10].direction = 'down';
     axes[11].score = 12; axes[11].direction = 'up';
+    var polarity = {
+      energy: -1, inflation: -1, consumers: 1, confidence: 1,
+      employment: 1, growth: 1, financing: 1, business: 1,
+      credit: 1, volatility: -1, participation: 1, outlook: 1
+    };
+    axes.forEach(function (axis) {
+      var contribution = axis.score * (polarity[axis.key] || 1);
+      axis.tone = contribution > 0 ? 'support' : contribution < 0 ? 'pressure' : 'neutral';
+    });
     return {
       kind: 'spid/daily-market-story@1',
       service: 'nugget',
@@ -231,104 +240,124 @@
   function renderHeader(payload) {
     clear(_metaEl);
     if (!payload) return;
-
-    var status = payload.fixture ? 'fixture' : payload.status;
-    var badge = el('span', 'dms-status ' + (payload.fixture ? 'is-fixture' : statusClass(status).replace('dms-status ', '')));
-    badge.textContent = payload.fixture ? t('dms.status.fixture') : statusLabel(payload.status);
-    _metaEl.appendChild(badge);
-
     var date = parseDate(payload.generated_at);
     _metaEl.appendChild(el('span', 'dms-meta-date', fmtDate(date)));
-
-    var coverage = payload.coverage || {};
-    _metaEl.appendChild(el(
-      'span', 'dms-meta-coverage',
-      t('dms.coverage', { measured: coverage.measured || 0, total: coverage.total || AXIS_KEYS.length })
-    ));
-
-    if (payload.feed === 'ibkr-headless') {
-      _metaEl.appendChild(el('span', 'dms-meta-feed', t('dms.feed.ibkr')));
-    }
-    if (payload.session) {
-      _metaEl.appendChild(el('span', 'dms-meta-session',
-        t('dms.session.' + payload.session)));
-    }
-    if (payload.gather && payload.gather.requested) {
-      var gather = payload.gather;
-      var types = gather.data_types || {};
-      _metaEl.appendChild(el('span', 'dms-meta-gather', t('dms.gather', {
-        received: gather.received || 0,
-        requested: gather.requested || 0,
-        ms: fmtNumber(gather.duration_ms, 0),
-        live: types['1'] || 0,
-        delayed: types['3'] || 0
-      })));
+    if (payload.fixture) {
+      _metaEl.appendChild(el('span', 'dms-meta-fixture', t('dms.status.fixture')));
     }
     if (_refreshNote) {
       _metaEl.appendChild(el('span', 'dms-refresh-note', _refreshNote));
     }
   }
 
-  function renderExpression(payload) {
+  function pickVariant(prefix, count, seed, salt) {
+    var s = String(seed) + '|' + String(salt);
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    var idx = h % count;
+    var key = prefix + '.' + idx;
+    var out = t(key);
+    return out === key ? t(prefix + '.0') : out;
+  }
+
+  function buildStory(payload) {
+    var expression = payload.expression || {};
+    var measured = (payload.axes || []).filter(function (a) {
+      return a.score !== null && a.score !== undefined && a.status !== 'missing';
+    });
+    if (!expression.code || measured.length < 4) {
+      return { paragraphs: [t('dms.story.insufficient')] };
+    }
+
+    var polarity = expression.polarity || 'neutral';
+    var support = measured.filter(function (a) { return a.tone === 'support'; })
+      .sort(function (a, b) { return Math.abs(b.score) - Math.abs(a.score); })[0];
+    var pressure = measured.filter(function (a) { return a.tone === 'pressure'; })
+      .sort(function (a, b) { return Math.abs(b.score) - Math.abs(a.score); })[0];
+
+    var regions = payload.regions || {};
+    var regionKeys = Object.keys(regions).filter(function (k) {
+      return regions[k] && regions[k].change_pct !== undefined && regions[k].change_pct !== null;
+    });
+    var best = null;
+    var worst = null;
+    if (regionKeys.length >= 2) {
+      var sorted = regionKeys.slice().sort(function (a, b) {
+        return regions[b].change_pct - regions[a].change_pct;
+      });
+      best = sorted[0];
+      worst = sorted[sorted.length - 1];
+    }
+
+    var seed = String(payload.generated_at || '').slice(0, 10) + ':' + (expression.code || '');
+    var open = pickVariant('dms.story.open.' + polarity, 2, seed, 0);
+    var close = pickVariant('dms.story.close.' + polarity, 2, seed, 1);
+
+    var first = t('dms.story.gloss.' + polarity) + ' ' + open;
+    var second = [];
+    if (support) second.push(t('dms.story.support', { axis: axisLabel(support.key), direction: directionLabel(support.direction) }));
+    if (pressure) second.push(t('dms.story.pressure', { axis: axisLabel(pressure.key), direction: directionLabel(pressure.direction) }));
+    if (!support && !pressure) second.push(t('dms.story.balance'));
+    if (best && worst && best !== worst) {
+      second.push(t('dms.story.region', {
+        best: t('dms.region.' + best),
+        worst: t('dms.region.' + worst)
+      }));
+    }
+
+    var third = [];
+    var contradiction = payload.contradiction && payload.contradiction.code;
+    if (contradiction && contradiction !== 'none' && contradiction !== 'insufficient') {
+      third.push(t('dms.contradiction.' + contradiction));
+    } else if (support && pressure) {
+      third.push(t('dms.story.tension', {
+        support: axisLabel(support.key),
+        pressure: axisLabel(pressure.key)
+      }));
+    }
+    if (payload.watch && payload.watch.length) {
+      third.push(t('dms.story.watch', {
+        axis1: axisLabel(payload.watch[0]),
+        axis2: axisLabel(payload.watch[1] || payload.watch[0])
+      }));
+    }
+    third.push(close);
+
+    return {
+      paragraphs: [first, second.join(' '), third.join(' ')].filter(function (p) {
+        return p && p.trim();
+      })
+    };
+  }
+
+  function renderStory(payload) {
     var section = el('section', 'dms-hero');
     var expression = payload.expression || {};
     var hasExpression = expression.code && expression.word;
 
-    var letter = el('div', 'dms-letter', hasExpression ? expression.code : '·');
+    var head = el('div', 'dms-hero-head');
+    head.appendChild(el('div', 'dms-letter', hasExpression ? expression.code : '·'));
     var words = el('div', 'dms-hero-words');
-    var word = el('div', 'dms-word', hasExpression ? expression.word : t('dms.no_expression'));
-    var line = el('div', 'dms-hero-line');
-    if (hasExpression) {
-      line.appendChild(el('span', 'dms-polarity is-' + expression.polarity,
-        t('dms.polarity.' + expression.polarity)));
-      line.appendChild(el('span', 'dms-score', t('dms.score', { score: fmtSigned(expression.score) })));
-    } else {
-      line.appendChild(el('span', 'dms-note', t('dms.no_expression_note')));
-    }
-    words.appendChild(word);
-    words.appendChild(line);
-
-    section.appendChild(letter);
-    section.appendChild(words);
+    words.appendChild(el('div', 'dms-word',
+      hasExpression ? expression.word : t('dms.no_expression')));
+    words.appendChild(el('div', 'dms-kicker', t('dms.story.kicker')));
+    head.appendChild(words);
+    section.appendChild(head);
 
     if (payload.fixture) {
       section.appendChild(el('div', 'dms-fixture-banner', t('dms.fixture.banner')));
     }
 
-    var headline = el('p', 'dms-headline', buildHeadline(payload));
-    section.appendChild(headline);
-
-    var summary = el('p', 'dms-summary', buildSummary(payload));
-    section.appendChild(summary);
+    var story = buildStory(payload);
+    story.paragraphs.forEach(function (paragraph, index) {
+      section.appendChild(el(
+        'p',
+        'dms-story-p' + (index === 0 ? ' is-lead' : ''),
+        paragraph
+      ));
+    });
 
     return section;
-  }
-
-  function buildHeadline(payload) {
-    var expression = payload.expression || {};
-    if (!expression.word) return t('dms.headline.insufficient');
-    var measured = (payload.axes || []).filter(function (a) {
-      return a.score !== null && a.score !== undefined;
-    });
-    var lead = measured.slice().sort(function (a, b) {
-      return Math.abs(b.score) - Math.abs(a.score);
-    })[0];
-    if (!lead) return t('dms.headline.pattern_simple', { word: expression.word });
-    return t('dms.headline.pattern', {
-      word: expression.word,
-      axis: axisLabel(lead.key),
-      direction: directionLabel(lead.direction)
-    });
-  }
-
-  function buildSummary(payload) {
-    var coverage = payload.coverage || {};
-    var measured = coverage.measured || 0;
-    var total = coverage.total || AXIS_KEYS.length;
-    if (payload.fixture) return t('dms.summary.fixture');
-    if (payload.status === 'offline') return t('dms.summary.offline');
-    if (!measured) return t('dms.summary.none');
-    return t('dms.summary.pattern', { measured: measured, total: total });
   }
 
   function renderAxes(payload) {
@@ -391,104 +420,38 @@
     return section;
   }
 
-  function renderContradiction(payload) {    var section = el('section', 'dms-section');
-    section.appendChild(el('h3', 'dms-section-title', t('dms.section.contradiction')));
-    var code = (payload.contradiction && payload.contradiction.code) || 'insufficient';
-    var text = t('dms.contradiction.' + code);
-    if (text === 'dms.contradiction.' + code) text = t('dms.contradiction.insufficient');
-    var box = el('p', 'dms-contradiction' + (code === 'none' || code === 'insufficient' ? ' is-empty' : ''), text);
-    section.appendChild(box);
-    return section;
-  }
-
-  function renderWatch(payload) {
-    var section = el('section', 'dms-section');
-    section.appendChild(el('h3', 'dms-section-title', t('dms.section.watch')));
-    var list = el('ul', 'dms-watch-list');
-    var watch = payload.watch || [];
-    if (!watch.length) {
-      list.appendChild(el('li', 'dms-note', t('dms.watch.none')));
-    } else {
-      watch.forEach(function (key) {
-        var axis = (payload.axes || []).filter(function (a) { return a.key === key; })[0];
-        var item = el('li', 'dms-watch-item');
-        item.appendChild(el('strong', null, axisLabel(key)));
-        if (axis && axis.score !== null && axis.score !== undefined) {
-          item.appendChild(el('span', 'dms-watch-score',
-            ' ' + fmtSigned(axis.score) + ' · ' + directionLabel(axis.direction)));
-        }
-        list.appendChild(item);
-      });
-    }
-    section.appendChild(list);
-    return section;
-  }
-
-  function renderReadings(payload) {
-    var readings = payload.readings || [];
-    var symbolFeed = payload.feed === 'ibkr-headless';
-    var section = el('section', 'dms-section');
-    var details = document.createElement('details');
-    details.className = 'dms-readings';
-    var summary = document.createElement('summary');
-    summary.textContent = t('dms.section.readings', { count: readings.length });
-    details.appendChild(summary);
-
-    if (!readings.length) {
-      details.appendChild(el('p', 'dms-note', t('dms.readings.none')));
-    } else {
-      var columns = symbolFeed
-        ? ['symbol', 'change', 'prev_close', 'volume', 'direction', 'freshness']
-        : ['pair', 'change', 'ratio_z', 'pressure', 'macro', 'freshness'];
-      var table = el('table', 'dms-readings-table');
-      var thead = document.createElement('thead');
-      var hr = document.createElement('tr');
-      columns.forEach(function (k) {
-        hr.appendChild(el('th', null, t('dms.readings.col.' + k)));
-      });
-      thead.appendChild(hr);
-      table.appendChild(thead);
-      var tbody = document.createElement('tbody');
-      readings.forEach(function (r) {
-        var tr = document.createElement('tr');
-        var change = Number(r.change_pct);
-        var direction = isNaN(change) ? '—'
-          : change > 0.05 ? t('dms.direction.up')
-          : change < -0.05 ? t('dms.direction.down')
-          : t('dms.direction.flat');
-        var age = (r.age_b !== null && r.age_b !== undefined) ? r.age_b : r.age_s;
-        var ageCell = (r.fresh ? t('dms.fresh') : t('dms.stale')) +
-          (age !== null && age !== undefined ? ' · ' + fmtNumber(age, 0) + 's' : '');
-        if (symbolFeed) {
-          tr.appendChild(el('td', null, r.symbol || r.pair || '—'));
-          tr.appendChild(el('td', null, fmtSigned(r.change_pct) + '%'));
-          tr.appendChild(el('td', null, fmtNumber(r.prev_close, 2)));
-          tr.appendChild(el('td', null, fmtNumber(r.volume, 0)));
-          tr.appendChild(el('td', null, direction));
-          tr.appendChild(el('td', null, ageCell));
-        } else {
-          tr.appendChild(el('td', null, r.pair || r.symbol || '—'));
-          tr.appendChild(el('td', null, fmtSigned(r.change_pct) + '%'));
-          tr.appendChild(el('td', null,
-            (r.z_score === null || r.z_score === undefined) ? '—' : fmtSigned(r.z_score)));
-          tr.appendChild(el('td', null,
-            (r.volume_pressure === null || r.volume_pressure === undefined)
-              ? '—' : fmtNumber(r.volume_pressure, 3)));
-          tr.appendChild(el('td', null, r.macro_trend || direction));
-          tr.appendChild(el('td', null, ageCell));
-        }
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      details.appendChild(table);
-    }
-    section.appendChild(details);
-    return section;
-  }
-
   function renderSources(payload) {
     var section = el('section', 'dms-section dms-sources');
     section.appendChild(el('h3', 'dms-section-title', t('dms.section.sources')));
+
+    var coverage = payload.coverage || {};
+    section.appendChild(el('p', 'dms-details-meta', t('dms.details.status', {
+      status: statusLabel(payload.status),
+      measured: coverage.measured || 0,
+      total: coverage.total || AXIS_KEYS.length
+    })));
+
+    var expression = payload.expression || {};
+    if (expression.code) {
+      section.appendChild(el('p', 'dms-details-meta', t('dms.details.expression', {
+        code: expression.code,
+        polarity: t('dms.polarity.' + expression.polarity),
+        score: fmtSigned(expression.score)
+      })));
+    }
+
+    if (payload.gather && payload.gather.requested) {
+      var gather = payload.gather;
+      var types = gather.data_types || {};
+      section.appendChild(el('p', 'dms-details-meta', t('dms.gather', {
+        received: gather.received || 0,
+        requested: gather.requested || 0,
+        ms: fmtNumber(gather.duration_ms, 0),
+        live: types['1'] || 0,
+        delayed: types['3'] || 0
+      })));
+    }
+
     var list = el('ul', 'dms-source-list');
     if (payload.feed === 'ibkr-headless') {
       list.appendChild(el('li', null, t('dms.source.ibkr')));
@@ -508,6 +471,19 @@
     if (payload.disclaimer) list.appendChild(el('li', 'dms-note', t('dms.disclaimer')));
     section.appendChild(list);
     return section;
+  }
+
+  function renderDetails(payload) {
+    var details = document.createElement('details');
+    details.className = 'dms-details';
+    var summary = document.createElement('summary');
+    summary.textContent = t('dms.details');
+    details.appendChild(summary);
+    details.appendChild(renderAxes(payload));
+    var regionsSection = renderRegions(payload);
+    if (regionsSection) details.appendChild(regionsSection);
+    details.appendChild(renderSources(payload));
+    return details;
   }
 
   function render(payload) {
@@ -546,25 +522,8 @@
       return;
     }
 
-    _body.appendChild(renderExpression(payload));
-    _body.appendChild(renderAxes(payload));
-    var regionsSection = renderRegions(payload);
-    if (regionsSection) _body.appendChild(regionsSection);
-    _body.appendChild(renderContradiction(payload));
-    _body.appendChild(renderWatch(payload));
-    _body.appendChild(renderReadings(payload));
-    _body.appendChild(renderSources(payload));
-
-    var footer = el('div', 'dms-footer');
-    var toggle = el('button', 'btn btn-ghost dms-fixture-toggle', _fixture ? t('dms.fixture.off') : t('dms.fixture.on'));
-    toggle.type = 'button';
-    toggle.addEventListener('click', function () {
-      _fixture = !_fixture;
-      renderHeader(activePayload());
-      render(activePayload());
-    });
-    footer.appendChild(toggle);
-    _body.appendChild(footer);
+    _body.appendChild(renderStory(payload));
+    _body.appendChild(renderDetails(payload));
   }
 
   function setRefreshBusy(busy) {

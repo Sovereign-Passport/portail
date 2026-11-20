@@ -816,13 +816,15 @@ html.dms-open { overflow: hidden; }
 
 .dms-hero {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 16px;
   padding: 16px;
   border: 1px solid rgba(255,255,255,0.09);
   border-radius: 12px;
   background: rgba(255,255,255,0.025);
+}
+.dms-hero-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 .dms-letter {
   flex: 0 0 auto;
@@ -839,6 +841,43 @@ html.dms-open { overflow: hidden; }
   line-height: 1;
 }
 .dms-hero-words { min-width: 0; }
+.dms-kicker {
+  margin-top: 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.dms-story-p {
+  margin-top: 13px;
+  font-size: 14px;
+  line-height: 1.62;
+  color: #e8e2d6;
+}
+.dms-story-p.is-lead {
+  margin-top: 17px;
+  font-size: 15px;
+  color: #f2ecdd;
+}
+.dms-details {
+  margin-top: 22px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+.dms-details > summary {
+  cursor: pointer;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.dms-details[open] > summary { margin-bottom: 8px; }
+.dms-details-meta {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: 'Courier New', monospace;
+}
 .dms-word { font-size: 21px; color: var(--text); }
 .dms-hero-line { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 5px; font-size: 10.5px; }
 .dms-polarity { text-transform: uppercase; letter-spacing: 0.1em; font-size: 9.5px; }
